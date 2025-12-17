@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": ["deno.window", "dom"]
+  },
+  "tasks": {
+    "dev": "deno run --allow-all --watch main.ts"
+  }
+}
