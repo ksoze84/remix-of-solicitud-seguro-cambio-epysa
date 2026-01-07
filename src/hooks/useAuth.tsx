@@ -1,8 +1,10 @@
-import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
-import { User, Session } from '@supabase/supabase-js';
+import { useState, useEffect, createContext, useContext, ReactNode, useMemo } from 'react';
+import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { secureLogger } from '@/utils/secureLogger';
+import { Epysa } from '@/integrations/epy/EpysaApi';
+import { User } from '@/types';
 
 interface AuthContextType {
   user: User | null;
@@ -17,70 +19,20 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [userProfile, setUserProfile] = useState<any>(null);
+export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
+  const [ user, setUser ] = useState<User | null>(null);
+  const [ loading, setLoading ] = useState(true);
+  const [ userProfile, setUserProfile ] = useState<any>(null);
   const { toast } = useToast();
 
   useEffect(() => {
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        secureLogger.info('Auth state changed:', { event, userId: session?.user?.id });
-        setSession(session);
-        setUser(session?.user ?? null);
-        
-        // Fetch user profile when user logs in
-        if (session?.user && event === 'SIGNED_IN') {
-          setTimeout(async () => {
-            try {
-              const { data: profile } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('user_id', session.user.id)
-                .single();
-              
-              setUserProfile(profile);
-              secureLogger.info('User profile loaded');
-            } catch (error) {
-              secureLogger.error('Error fetching user profile:', error);
-            }
-          }, 0);
-        } else if (!session?.user) {
-          setUserProfile(null);
-        }
-        
-        setLoading(false);
-      }
-    );
+    Epysa.auth.getUserData()
+      .then(u => {
+        setUser( {login: u.login} );
+        setUserProfile(u);
+      })
+      .finally(() => setLoading(false));
 
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      
-      if (session?.user) {
-        setTimeout(async () => {
-          try {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('user_id', session.user.id)
-              .single();
-            
-            setUserProfile(profile);
-          } catch (error) {
-            secureLogger.error('Error fetching user profile:', error);
-          }
-        }, 0);
-      }
-      
-      setLoading(false);
-    });
-
-    return () => subscription.unsubscribe();
   }, []);
 
   const signInWithPassword = async (email: string, password: string) => {
@@ -108,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email,
         password,
         options: {
-          emailRedirectTo: `${window.location.origin}/`
+          emailRedirectTo: `${globalThis.location.origin}/`
         }
       });
       
@@ -134,7 +86,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const resetPassword = async (email: string) => {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/`
+        redirectTo: `${globalThis.location.origin}/`
       });
       
       if (error) {
@@ -161,16 +113,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const value = {
+  const value = useMemo(() => ({
     user,
-    session,
+    session : null,
     loading,
     signInWithPassword,
     signUpWithPassword,
     resetPassword,
     signOut,
     userProfile
-  };
+  }), [user, loading, userProfile]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

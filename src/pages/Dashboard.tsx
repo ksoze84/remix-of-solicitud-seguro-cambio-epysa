@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Filter, Download, Eye, Edit, Trash2 } from "lucide-react";
+import { Plus, Download, Eye, Edit } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,18 +8,17 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { CoverageIndicator } from "@/components/ui/coverage-indicator";
-
 import { CurrencyRequest, UserRole, RequestStatus } from "@/types";
 import { formatCurrency, calculateCoverage, formatNumber } from "@/utils/coverage";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useViewRole } from "@/contexts/ViewRoleContext";
+import { Epysa } from "@/integrations/epy/EpysaApi";
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user: authUser, userProfile, signOut } = useAuth();
+  const { user: authUser, userProfile } = useAuth();
   const { currentViewRole } = useViewRole();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
@@ -34,17 +33,12 @@ export default function Dashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const { data: { user: authUser } } = await supabase.auth.getUser();
-        if (!authUser || !userProfile) return;
 
-        setCurrentUserId(authUser.id);
+        setCurrentUserId(userProfile.login || '');
 
-        const { data, error } = await supabase
-          .from('currency_requests')
-          .select('*')
-          .order('created_at', { ascending: false });
 
-        if (error) throw error;
+
+        const data = (await Epysa.data.exec('frwrd/list_currency_requests')).data;
 
         // Convert database format to app format
         const convertedRequests: CurrencyRequest[] = data.map(req => ({
@@ -52,16 +46,16 @@ export default function Dashboard() {
           sellerId: req.user_id,
           cliente: req.cliente,
           rut: req.rut,
-          montoNegocioUsd: parseFloat(req.monto_negocio_usd.toString()),
+          montoNegocioUsd: Number.parseFloat(req.monto_negocio_usd.toString()),
           unidades: req.unidades,
-          numerosInternos: req.numeros_internos,
+          numerosInternos: JSON.parse(req.numeros_internos) as string[],
           numeroSie: (req as any).numero_sie,
-          tcCliente: (req as any).tc_cliente ? parseFloat((req as any).tc_cliente.toString()) : undefined,
+          tcCliente: (req as any).tc_cliente ? Number.parseFloat((req as any).tc_cliente.toString()) : undefined,
           notas: req.notas,
           banco: req.banco,
           diasForward: req.dias_forward,
-          porcentajeCobertura: req.porcentaje_cobertura ? parseFloat(req.porcentaje_cobertura.toString()) : undefined,
-          payments: req.payments as any[],
+          porcentajeCobertura: req.porcentaje_cobertura ? Number.parseFloat(req.porcentaje_cobertura.toString()) : undefined,
+          payments: JSON.parse(req.payments) as any[],
           estado: req.estado as RequestStatus,
           createdAt: new Date(req.created_at),
           updatedAt: new Date(req.updated_at)
@@ -104,18 +98,15 @@ export default function Dashboard() {
 
   if (!authUser || !userProfile) return null;
 
+
   const user = {
     email: authUser.email || '',
-    role: userProfile.role === 'ADMIN' ? UserRole.ADMIN : (userProfile.role === 'COORDINADOR' ? UserRole.COORDINADOR : UserRole.VENDEDOR)
+    role: getUserRole(userProfile.role)
   };
 
   // Effective role for view (considers the view role selector for admins)
   const effectiveRole = currentViewRole || user.role;
 
-  const handleLogout = async () => {
-    await signOut();
-    navigate('/login');
-  };
 
   const onNewRequest = () => navigate('/nueva-solicitud');
   const onViewRequest = (id: string) => navigate(`/solicitud/${id}`);
@@ -132,7 +123,7 @@ export default function Dashboard() {
   // Create request numbers based on creation date (oldest = 0, newest = highest)
   const sortedByDate = [...requests].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
   const requestNumbers = sortedByDate.reduce((acc, req, index) => {
-    acc[req.id!] = index; // Oldest = 0, newest = n-1
+    acc[req.id] = index; // Oldest = 0, newest = n-1
     return acc;
   }, {} as Record<string, number>);
 
@@ -175,7 +166,7 @@ export default function Dashboard() {
     // Sort by creation date (newest first), then by request number (highest first)
     const dateCompare = b.createdAt.getTime() - a.createdAt.getTime();
     if (dateCompare !== 0) return dateCompare;
-    return requestNumbers[b.id!] - requestNumbers[a.id!];
+    return requestNumbers[b.id] - requestNumbers[a.id];
   });
 
 
@@ -313,7 +304,7 @@ export default function Dashboard() {
                             </TableCell>
                           )}
                           <TableCell className="font-medium">{request.cliente}</TableCell>
-                          <TableCell>{formatRequestNumber(requestNumbers[request.id!])}</TableCell>
+                          <TableCell>{formatRequestNumber(requestNumbers[request.id])}</TableCell>
                           {isAdmin ? (
                             <>
                               <TableCell>{formatNumber(request.unidades, 0)}</TableCell>
@@ -358,7 +349,7 @@ export default function Dashboard() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => onViewRequest(request.id!)}
+                          onClick={() => onViewRequest(request.id)}
                         >
                           <Eye className="h-4 w-4" />
                         </Button>
@@ -366,7 +357,7 @@ export default function Dashboard() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => onEditRequest(request.id!)}
+                            onClick={() => onEditRequest(request.id)}
                           >
                             <Edit className="h-4 w-4" />
                           </Button>
@@ -385,3 +376,10 @@ export default function Dashboard() {
       </div>
     );
   }
+
+
+const getUserRole = (profileRole: string): UserRole => {
+  if (profileRole === 'ADMIN') return UserRole.ADMIN;
+  if (profileRole === 'COORDINADOR') return UserRole.COORDINADOR;
+  return UserRole.VENDEDOR;
+};

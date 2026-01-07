@@ -28,7 +28,7 @@ interface HeaderProps {
   onViewRoleChange?: (role: UserRole) => void;
 }
 
-export function Header({ user, onLogout, currentViewRole, onViewRoleChange }: HeaderProps) {
+export function Header({ user, onLogout, currentViewRole, onViewRoleChange }: Readonly<HeaderProps>) {
   return (
     <header className="sticky top-0 z-50 border-b bg-card">
       <div className="flex h-16 items-center justify-between px-6">

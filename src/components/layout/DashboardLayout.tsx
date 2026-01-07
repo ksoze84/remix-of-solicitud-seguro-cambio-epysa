@@ -10,7 +10,7 @@ interface DashboardLayoutProps {
   children: React.ReactNode;
 }
 
-function DashboardLayoutContent({ children }: DashboardLayoutProps) {
+function DashboardLayoutContent({ children }: Readonly<DashboardLayoutProps>) {
   const navigate = useNavigate();
   const { user: authUser, userProfile, signOut } = useAuth();
   const { currentViewRole, setCurrentViewRole } = useViewRole();
@@ -18,7 +18,7 @@ function DashboardLayoutContent({ children }: DashboardLayoutProps) {
   if (!authUser || !userProfile) return null;
 
   const user = {
-    email: authUser.email || '',
+    email: authUser.login || '',
     role: userProfile.role === 'ADMIN' ? UserRole.ADMIN : (userProfile.role === 'COORDINADOR' ? UserRole.COORDINADOR : UserRole.VENDEDOR)
   };
 
@@ -49,7 +49,7 @@ function DashboardLayoutContent({ children }: DashboardLayoutProps) {
   );
 }
 
-export function DashboardLayout({ children }: DashboardLayoutProps) {
+export function DashboardLayout({ children }: Readonly<DashboardLayoutProps>) {
   return (
     <ViewRoleProvider>
       <DashboardLayoutContent>{children}</DashboardLayoutContent>

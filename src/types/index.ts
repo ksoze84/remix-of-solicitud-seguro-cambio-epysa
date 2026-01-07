@@ -22,10 +22,10 @@ export enum PaymentType {
 }
 
 export interface User {
-  id: string;
-  email: string;
-  role: UserRole;
-  createdAt: Date;
+  login: string;
+  email?: string;
+  role?: UserRole;
+  createdAt?: Date;
   lastLoginAt?: Date;
 }
 

@@ -3,7 +3,7 @@ import { RequestForm } from "@/components/forms/request-form";
 import { CurrencyRequest, RequestStatus, UserRole } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client";
+import { Epysa } from "@/integrations/epy/EpysaApi";
 
 export default function NewRequest() {
   const navigate = useNavigate();
@@ -19,19 +19,14 @@ export default function NewRequest() {
 
   const handleSave = async (requestData: Partial<CurrencyRequest>, status: RequestStatus, selectedUserId?: string) => {
     try {
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (!currentUser) {
-        throw new Error("Usuario no autenticado");
-      }
-
       // Convert request data to database format
       // If admin and selectedUserId is provided, use that; otherwise use current user
       const dbRequest = {
-        user_id: selectedUserId || currentUser.id,
-        cliente: requestData.cliente!,
-        rut: requestData.rut!,
-        monto_negocio_usd: requestData.montoNegocioUsd!,
-        unidades: requestData.unidades!,
+        user_id: selectedUserId || authUser.login,
+        cliente: requestData.cliente,
+        rut: requestData.rut,
+        monto_negocio_usd: requestData.montoNegocioUsd,
+        unidades: requestData.unidades,
         numeros_internos: requestData.numerosInternos || [],
         notas: requestData.notas,
         payments: requestData.payments || [],
@@ -39,13 +34,9 @@ export default function NewRequest() {
         tc_referencial: requestData.tcReferencial
       };
 
-      const { data, error } = await supabase
-        .from('currency_requests')
-        .insert([dbRequest] as any)
-        .select()
-        .single();
 
-      if (error) throw error;
+      await Epysa.data.exec('frwrd/save_currency_request', dbRequest);
+      
 
       toast({
         title: "Éxito",

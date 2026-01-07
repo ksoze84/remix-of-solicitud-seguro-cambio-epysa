@@ -1,6 +1,6 @@
-import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Epysa } from "@/integrations/epy/EpysaApi";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -27,7 +27,7 @@ export const ProtectedRoute = ({ children }: ProtectedRouteProps) => {
   }
 
   if (!user) {
-    return <Navigate to="/login" replace />;
+    Epysa.auth.goLogin();
   }
 
   return <>{children}</>;
