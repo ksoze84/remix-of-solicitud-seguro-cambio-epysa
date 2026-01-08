@@ -66,20 +66,14 @@ export default function Dashboard() {
         // Fetch seller names for admin view
         if (userProfile.role === 'ADMIN') {
           const uniqueSellerIds = [...new Set(convertedRequests.map(req => req.sellerId))];
-          const { data: profiles, error: profileError } = await supabase
-            .from('profiles')
-            .select('user_id, nombre_apellido')
-            .in('user_id', uniqueSellerIds);
-
-          if (!profileError && profiles) {
             const namesMap: Record<string, string> = {};
-            profiles.forEach(profile => {
-              if (profile.user_id) {
-                namesMap[profile.user_id] = profile.nombre_apellido || 'Sin nombre';
+            uniqueSellerIds.forEach(profile => {
+              if (profile) {
+                namesMap[profile] = profile;
               }
             });
             setSellerNames(namesMap);
-          }
+          
         }
       } catch (error) {
         console.error('Error fetching requests:', error);

@@ -373,7 +373,7 @@ export default function RequestDetail() { //NOSONAR
         // Fetch approval date from audit_logs for approved requests
         if (convertedRequest.estado === RequestStatus.APROBADA) {
 
-          const auditData = (await exec('frwrd/get_approval_info', { record_id: requestId })).data[0];
+          const auditData = (await exec('frwrd/get_approval_info', { request_id: requestId })).data[0];
 
           if (auditData) {
             setApprovalDate(new Date(auditData.created_at));
@@ -447,7 +447,8 @@ export default function RequestDetail() { //NOSONAR
         tc_all_in: Number.parseFloat(tcAllIn) || null,
         numeros_internos: numerosInternos.filter(n => n.trim() !== ""),
         payments: editPayments as any,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        user_id : authUser.login
       });
 
       setRequest(prev => ({
@@ -509,7 +510,8 @@ export default function RequestDetail() { //NOSONAR
         tc_referencial: editTcReferencial ? Number.parseFloat(editTcReferencial) : null,
         numeros_internos: numerosInternos.filter(n => n.trim() !== ''),
         payments: editPayments as any,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        user_id : authUser.login
       });
 
       setRequest(prev => prev ? {
@@ -622,6 +624,7 @@ export default function RequestDetail() { //NOSONAR
 
       const updatedData = (await exec('frwrd/save_currency_request', {
         id: requestId,
+        user_id : authUser.login,
         ...updateData
       })).data[0];
 
