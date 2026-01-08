@@ -14,7 +14,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useViewRole } from "@/contexts/ViewRoleContext";
-import { Epysa } from "@/integrations/epy/EpysaApi";
+import { exec } from "@/integrations/epy/EpysaApi";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -38,7 +38,7 @@ export default function Dashboard() {
 
 
 
-        const data = (await Epysa.data.exec('frwrd/list_currency_requests')).data;
+        const data = (await exec('frwrd/list_currency_requests')).data;
 
         // Convert database format to app format
         const convertedRequests: CurrencyRequest[] = data.map(req => ({

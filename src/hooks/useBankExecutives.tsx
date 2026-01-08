@@ -1,5 +1,5 @@
+import { exec } from '@/integrations/epy/EpysaApi';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 
 export interface BankExecutive {
   id: string;
@@ -25,14 +25,8 @@ export const useBankExecutives = (bankName?: string) => {
     try {
       setLoading(true);
       setError(null);
-      
-      const { data, error } = await supabase
-        .from('bank_executives')
-        .select('id, name, bank_name, contact_number')
-        .eq('bank_name', bank)
-        .order('name');
 
-      if (error) throw error;
+      const data = (await exec('frwrd/list_bank_executives', { bank_name: bank })).data as BankExecutive[];
 
       setExecutives(data || []);
     } catch (err) {

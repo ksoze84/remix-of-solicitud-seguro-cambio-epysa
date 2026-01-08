@@ -354,12 +354,14 @@ IF OBJECT_ID('frwrd.list_currency_requests', 'P') IS NOT NULL
 GO
 --INICIAL
 CREATE PROCEDURE frwrd.list_currency_requests 
+    @id UNIQUEIDENTIFIER = NULL
 AS
 BEGIN
     SET NOCOUNT ON;
 
     SELECT *
     FROM frwrd.currency_requests c
+    WHERE (@id IS NULL OR c.id = @id)
     ORDER BY c.created_at DESC;
 END
 GO
@@ -522,86 +524,201 @@ BEGIN
     SELECT error_msg = @error_msg, registros = @rowcount, nuevoID = @newid
 END
 
+GO
+IF OBJECT_ID('frwrd.list_bank_executives', 'P') IS NOT NULL
+    DROP PROCEDURE frwrd.list_bank_executives
+GO
+--INICIAL
+CREATE PROCEDURE frwrd.list_bank_executives 
+    @id UNIQUEIDENTIFIER = NULL,
+    @bank_name NVARCHAR(255) = NULL
+AS
+BEGIN
+    SET NOCOUNT ON;
 
+    SELECT *
+    FROM frwrd.bank_executives be
+    WHERE (@id IS NULL OR be.id = @id)
+    AND (@bank_name IS NULL OR be.bank_name = @bank_name)
+    ORDER BY be.bank_name DESC;
+END
+GO
 
+IF OBJECT_ID('frwrd.save_bank_executive', 'P') IS NOT NULL
+    DROP PROCEDURE frwrd.save_bank_executive
+GO
+-- inicial
+CREATE PROCEDURE frwrd.save_bank_executive
+    @id UNIQUEIDENTIFIER = NULL,
+    @user_id VARCHAR(12),
+    @name NVARCHAR(255),
+    @contact_number NVARCHAR(50),
+    @bank_name NVARCHAR(255)
+AS
+BEGIN
+    SET NOCOUNT ON
+    DECLARE @rowcount INT = 0, 
+        @newid UNIQUEIDENTIFIER, 
+        @error_msg NVARCHAR(MAX)
+        
+    BEGIN TRY
+    BEGIN TRAN
+
+        -- Set current user context
+        EXEC frwrd.sp_set_current_user @user_id = @user_id
+        
+        SET @newid = @id
+        
+        -- Try UPDATE first if @id is provided
+        IF @id IS NOT NULL
+        BEGIN
+            UPDATE frwrd.bank_executives
+            SET 
+                name = @name,
+                contact_number = @contact_number,
+                bank_name = @bank_name,
+                updated_at = GETDATE()
+            WHERE id = @id
+            
+            SET @rowcount = @@ROWCOUNT
+        END
+
+        -- If no rows updated (or @id was NULL), perform INSERT
+        IF @rowcount = 0
+        BEGIN
+            SET @newid = NEWID()
+            
+            INSERT INTO frwrd.bank_executives
+            (
+                id,
+                name,
+                contact_number,
+                bank_name
+            )
+            VALUES
+            (
+                @newid,
+                @name,
+                @contact_number,
+                @bank_name
+            )
+            
+            SET @rowcount = @@ROWCOUNT
+
+            IF @rowcount <> 1
+                THROW 51000, 'numero de registros insertados <> 1', 1
+        END
+        
+    COMMIT TRAN  
+    END TRY
+    BEGIN CATCH
+        SELECT @error_msg = ERROR_MESSAGE()
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRAN
+    END CATCH
+        
+    SELECT error_msg = @error_msg, registros = @rowcount, nuevoID = @newid
+END
+
+GO
+IF OBJECT_ID('frwrd.delete_bank_executive', 'P') IS NOT NULL
+    DROP PROCEDURE frwrd.delete_bank_executive
+GO
+-- inicial
+CREATE PROCEDURE frwrd.delete_bank_executive
+    @id UNIQUEIDENTIFIER,
+    @user_id VARCHAR(12)
+AS
+BEGIN
+    SET NOCOUNT ON
+    DECLARE @rowcount INT = 0, 
+        @error_msg NVARCHAR(MAX),
+        @deleted_data NVARCHAR(MAX)
+        
+    BEGIN TRY
+    BEGIN TRAN
+
+        -- Set current user context
+        EXEC frwrd.sp_set_current_user @user_id = @user_id
+        
+        -- Capture the data before deletion
+        SELECT @deleted_data = (
+            SELECT * 
+            FROM frwrd.bank_executives 
+            WHERE id = @id 
+            FOR JSON PATH, WITHOUT_ARRAY_WRAPPER
+        )
+        
+        -- Perform DELETE operation
+        DELETE FROM frwrd.bank_executives
+        WHERE id = @id
+        
+        SET @rowcount = @@ROWCOUNT
+
+        IF @rowcount = 0
+            THROW 51001, 'No se encontro el registro a eliminar', 1
+        
+    COMMIT TRAN  
+    END TRY
+    BEGIN CATCH
+        SELECT @error_msg = ERROR_MESSAGE()
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRAN
+    END CATCH
+        
+    SELECT 
+        error_msg = @error_msg, 
+        registros = @rowcount, 
+        deleted_data = @deleted_data
+END
 
 
 GO
-CREATE PROCEDURE EXAMPLE_UPSERT
-(
-	@numero_interno_ccc INT				= NULL,
-	@cuenta_corriente VARCHAR (50)		= NULL,
-	@entidad_comercial VARCHAR(12)		= NULL,
-	@monto_linea_credito NUMERIC(20,7)	= NULL
-	
-)
+
+GO 
+
+-- Procedure to fetch last approval row from audit_logs for approved requests
+IF OBJECT_ID('frwrd.get_approval_info', 'P') IS NOT NULL
+    DROP PROCEDURE frwrd.get_approval_info
+GO
+-- inicial
+CREATE PROCEDURE frwrd.get_approval_info
+    @request_id UNIQUEIDENTIFIER
 AS
 BEGIN
-	
-	SET NOCOUNT ON
-	DECLARE @rowcount INT, 
-		@id INT, 
-		@error_msg NVARCHAR (MAX)
-			
-	BEGIN TRY
-	BEGIN TRAN
-
-		
-	SET @id = @numero_interno_ccc
-		
-	UPDATE ...
-
-        SET @rowcount = @@ROWCOUNT
-
-
-
-	IF @rowcount = 0
-	BEGIN
-		
-		INSERT INTO 
-		(
-		)
-		VALUES
-		(
-		)
-		
-		
-		SELECT @id = SCOPE_IDENTITY(), @rowcount = @@ROWCOUNT
-
-		IF @rowcount <> 1
-			THROW 51000, 'numero de registros insertados <> 1', 1
-
-	END
-	COMMIT TRAN  
-	END TRY
-	BEGIN CATCH
-		SELECT		@error_msg = ERROR_MESSAGE()
-		IF @@TRANCOUNT > 0
-			ROLLBACK TRAN
-	END CATCH
-			
-	Select error_msg = @error_msg, registros = @rowcount, nuevoID = @id
-			 
+    SET NOCOUNT ON;
+    DECLARE @error_msg NVARCHAR(MAX)
+    
+    BEGIN TRY
+        -- Get the last approval record for the request where estado changed to 'APROBADA'
+        SELECT TOP 1
+            al.id,
+            al.record_id,
+            al.action,
+            al.old_data,
+            al.new_data,
+            al.user_id,
+            al.user_email,
+            al.ip_address,
+            al.user_agent,
+            al.created_at
+        FROM frwrd.audit_logs al
+        WHERE al.table_name = 'currency_requests'
+            AND al.record_id = @request_id
+            AND al.new_data LIKE '%"estado"%"APROBADA"%'
+            AND al.action = 'STATUS_CHANGE'
+        ORDER BY al.created_at DESC;
+        
+    END TRY
+    BEGIN CATCH
+        SELECT @error_msg = ERROR_MESSAGE()
+        SELECT error_msg = @error_msg
+    END CATCH
 END
 
 GO
 
 
-exec frwrd.list_currency_requests
+EXEC ECP_ListaVendedores_Consola
 
-
-SELECT CAST('ppc' as uniqueidentifier)
-
-
-
-
-DECLARE @tes SQL_VARIANT
-SET @tes = 'ppc'
-SELECT SQL_VARIANT_PROPERTY(@tes, 'BaseType')
-SELECT SQL_VARIANT_PROPERTY(@tes, 'MaxLength')
-SELECT SQL_VARIANT_PROPERTY(@tes, 'Precision')
-SELECT SQL_VARIANT_PROPERTY(@tes, 'Scale')
-SELECT @tes
-
-
-SELECT OBJECT_ID('frwrd.sp_set_current_user', 'P')
+Entidad_comercial	Nombre	Tipo

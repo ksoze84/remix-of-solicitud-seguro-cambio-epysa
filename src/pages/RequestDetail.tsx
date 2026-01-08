@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Save, Check, X, FileText, Download, CalendarIcon } from "lucide-react";
+import { ArrowLeft, Save, Check, X, Download, CalendarIcon } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,18 +16,18 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { CoverageIndicator } from "@/components/ui/coverage-indicator";
-
-import { CurrencyRequest, UserRole, RequestStatus, PAYMENT_TYPE_LABELS, FORWARD_DAYS, Payment } from "@/types";
+import { CurrencyRequest, UserRole, RequestStatus, PAYMENT_TYPE_LABELS, Payment } from "@/types";
 import { PaymentForm } from "@/components/forms/payment-form";
 import { useBanks } from "@/hooks/useBanks";
 import { useBankExecutives } from '@/hooks/useBankExecutives';
-import { formatCurrency, calculateCoverage, formatPercentage, formatNumber } from "@/utils/coverage";
+import { formatCurrency, calculateCoverage, formatNumber } from "@/utils/coverage";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useViewRole } from "@/contexts/ViewRoleContext";
+import { exec } from "@/integrations/epy/EpysaApi";
 
-export default function RequestDetail() {
+export default function RequestDetail() { //NOSONAR
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -248,13 +248,7 @@ export default function RequestDetail() {
   useEffect(() => {
     const loadRequest = async () => {
       try {
-        const { data, error } = await supabase
-          .from('currency_requests')
-          .select('*')
-          .eq('id', requestId)
-          .single();
-
-        if (error) throw error;
+        const data = (await exec('frwrd/list_currency_requests', { id: requestId })).data[0];
 
         // Convert database format to CurrencyRequest format
         const convertedRequest: CurrencyRequest = {
@@ -268,14 +262,14 @@ export default function RequestDetail() {
           banco: data.banco,
           diasForward: data.dias_forward,
           porcentajeCobertura: data.porcentaje_cobertura,
-          tcCliente: data.tc_cliente ? parseFloat(data.tc_cliente.toString()) : undefined,
-          tcSpot: data.tc_spot ? parseFloat(data.tc_spot.toString()) : undefined,
-          puntosForwards: data.puntos_forwards ? parseFloat(data.puntos_forwards.toString()) : undefined,
-          tcAllIn: data.tc_all_in ? parseFloat(data.tc_all_in.toString()) : undefined,
-          tcReferencial: data.tc_referencial ? parseFloat(data.tc_referencial.toString()) : undefined,
+          tcCliente: data.tc_cliente ? Number.parseFloat(data.tc_cliente.toString()) : undefined,
+          tcSpot: data.tc_spot ? Number.parseFloat(data.tc_spot.toString()) : undefined,
+          puntosForwards: data.puntos_forwards ? Number.parseFloat(data.puntos_forwards.toString()) : undefined,
+          tcAllIn: data.tc_all_in ? Number.parseFloat(data.tc_all_in.toString()) : undefined,
+          tcReferencial: data.tc_referencial ? Number.parseFloat(data.tc_referencial.toString()) : undefined,
           numeroSie: data.numero_sie || undefined,
-          numerosInternos: data.numeros_internos || [],
-          payments: Array.isArray(data.payments) ? data.payments as any[] : [],
+          numerosInternos: (JSON.parse(data.numeros_internos) || []) as string[],
+          payments: (JSON.parse(data.payments) || []) as any[],
           notas: data.notas,
           createdAt: new Date(data.created_at),
           updatedAt: new Date(data.updated_at)
@@ -285,7 +279,7 @@ export default function RequestDetail() {
         
         // Load historical bank comparison data for approved requests
         if (data.bank_comparison_data && convertedRequest.estado === RequestStatus.APROBADA) {
-          const bankData = data.bank_comparison_data as any;
+          const bankData = JSON.parse(data.bank_comparison_data);
           console.log('Loading historical bank comparison data:', bankData);
           setHistoricalBankData(bankData);
           
@@ -332,7 +326,7 @@ export default function RequestDetail() {
         if (convertedRequest.estado === RequestStatus.APROBADA && data.bank_comparison_data && 
             (!convertedRequest.banco || !convertedRequest.tcSpot)) {
           console.log('Using bank_comparison_data fallback for approved request');
-          const bankData = data.bank_comparison_data as any;
+          const bankData = data.bank_comparison_data;
           // Find the selected bank (first one with seleccionado: true, or first bank if none selected)
           const selectedBank = Object.values(bankData).find((b: any) => b.seleccionado) || 
                                Object.values(bankData)[0];
@@ -366,12 +360,9 @@ export default function RequestDetail() {
         setEditPayments([...convertedRequest.payments]);
         
         // Calculate request number based on creation date
-        const { data: allRequests, error: allError } = await supabase
-          .from('currency_requests')
-          .select('id, created_at')
-          .order('created_at', { ascending: true });
+        const allRequests = (await exec('frwrd/list_currency_requests')).data;
         
-        if (!allError && allRequests) {
+        if (allRequests) {
           const requestIndex = allRequests.findIndex(r => r.id === requestId);
           if (requestIndex !== -1) {
             const formattedNumber = `#${String(requestIndex + 1).padStart(4, '0')}`;
@@ -381,17 +372,10 @@ export default function RequestDetail() {
 
         // Fetch approval date from audit_logs for approved requests
         if (convertedRequest.estado === RequestStatus.APROBADA) {
-          const { data: auditData, error: auditError } = await supabase
-            .from('audit_logs')
-            .select('created_at')
-            .eq('record_id', requestId)
-            .eq('action', 'STATUS_CHANGE')
-            .contains('new_data', { estado: 'APROBADA' })
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .single();
 
-          if (!auditError && auditData) {
+          const auditData = (await exec('frwrd/get_approval_info', { record_id: requestId })).data[0];
+
+          if (auditData) {
             setApprovalDate(new Date(auditData.created_at));
           }
         }
@@ -450,25 +434,21 @@ export default function RequestDetail() {
     try {
       const diasForward = forwardDate ? differenceInDays(forwardDate, new Date()) : undefined;
       
-      const { error } = await supabase
-        .from('currency_requests')
-        .update({
-          dias_forward: diasForward,
-          fecha_vencimiento: forwardDate?.toISOString() || null,
-          porcentaje_cobertura: porcentajeCobertura[0],
-          banco: banco || null,
-          numero_sie: numeroSie || null,
-          tc_cliente: parseFloat(tcCliente) || null,
-          tc_spot: parseFloat(tcSpot) || null,
-          puntos_forwards: parseFloat(puntosForwards) || null,
-          tc_all_in: parseFloat(tcAllIn) || null,
-          numeros_internos: numerosInternos.filter(n => n.trim() !== ""),
-          payments: editPayments as any,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', requestId);
-
-      if (error) throw error;
+      await exec('frwrd/save_currency_request', {
+        id: requestId,
+        dias_forward: diasForward,
+        fecha_vencimiento: forwardDate?.toISOString() || null,
+        porcentaje_cobertura: porcentajeCobertura[0],
+        banco: banco || null,
+        numero_sie: numeroSie || null,
+        tc_cliente: Number.parseFloat(tcCliente) || null,
+        tc_spot: Number.parseFloat(tcSpot) || null,
+        puntos_forwards: Number.parseFloat(puntosForwards) || null,
+        tc_all_in: Number.parseFloat(tcAllIn) || null,
+        numeros_internos: numerosInternos.filter(n => n.trim() !== ""),
+        payments: editPayments as any,
+        updated_at: new Date().toISOString()
+      });
 
       setRequest(prev => ({
         ...prev!,
@@ -476,10 +456,10 @@ export default function RequestDetail() {
         fechaVencimiento: forwardDate,
         porcentajeCobertura: porcentajeCobertura[0],
         banco,
-        tcCliente: parseFloat(tcCliente) || undefined,
-        tcSpot: parseFloat(tcSpot) || undefined,
-        puntosForwards: parseFloat(puntosForwards) || undefined,
-        tcAllIn: parseFloat(tcAllIn) || undefined,
+        tcCliente: Number.parseFloat(tcCliente) || undefined,
+        tcSpot: Number.parseFloat(tcSpot) || undefined,
+        puntosForwards: Number.parseFloat(puntosForwards) || undefined,
+        tcAllIn: Number.parseFloat(tcAllIn) || undefined,
         numeroSie: numeroSie || undefined,
         numerosInternos: numerosInternos.filter(n => n.trim() !== ""),
         payments: [...editPayments],
@@ -516,31 +496,29 @@ export default function RequestDetail() {
     }
     
     setIsSaving(true);
+
+    
     
     try {
-      const { error } = await supabase
-        .from('currency_requests')
-        .update({
-          cliente: editCliente,
-          rut: editRut,
-          monto_negocio_usd: parseFloat(editMontoNegocioUsd) || 0,
-          unidades: parseInt(editUnidades) || 0,
-          tc_referencial: editTcReferencial ? parseFloat(editTcReferencial) : null,
-          numeros_internos: numerosInternos.filter(n => n.trim() !== ''),
-          payments: editPayments as any,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', requestId);
-
-      if (error) throw error;
+      await exec('frwrd/save_currency_request', {
+        id: requestId,
+        cliente: editCliente,
+        rut: editRut,
+        monto_negocio_usd: Number.parseFloat(editMontoNegocioUsd) || 0,
+        unidades: Number.parseInt(editUnidades) || 0,
+        tc_referencial: editTcReferencial ? Number.parseFloat(editTcReferencial) : null,
+        numeros_internos: numerosInternos.filter(n => n.trim() !== ''),
+        payments: editPayments as any,
+        updated_at: new Date().toISOString()
+      });
 
       setRequest(prev => prev ? {
         ...prev,
         cliente: editCliente,
         rut: editRut,
-        montoNegocioUsd: parseFloat(editMontoNegocioUsd) || 0,
-        unidades: parseInt(editUnidades) || 0,
-        tcReferencial: editTcReferencial ? parseFloat(editTcReferencial) : undefined,
+        montoNegocioUsd: Number.parseFloat(editMontoNegocioUsd) || 0,
+        unidades: Number.parseInt(editUnidades) || 0,
+        tcReferencial: editTcReferencial ? Number.parseFloat(editTcReferencial) : undefined,
         numerosInternos: numerosInternos.filter(n => n.trim() !== ''),
         payments: [...editPayments],
         updatedAt: new Date()
@@ -641,22 +619,16 @@ export default function RequestDetail() {
       }
       
       console.log('Saving approval data:', updateData);
-      
-      const { data: updatedData, error } = await supabase
-        .from('currency_requests')
-        .update(updateData)
-        .eq('id', requestId)
-        .select();
 
-      if (error) {
-        console.error('Error updating request:', error);
-        throw error;
-      }
+      const updatedData = (await exec('frwrd/save_currency_request', {
+        id: requestId,
+        ...updateData
+      })).data[0];
 
       console.log('Successfully updated request with data:', updatedData);
 
       setRequest(prev => ({
-        ...prev!,
+        ...prev,
         estado: newStatus,
         updatedAt: new Date()
       }));

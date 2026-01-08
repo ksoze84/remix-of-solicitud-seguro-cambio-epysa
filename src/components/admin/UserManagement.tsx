@@ -403,8 +403,8 @@ export default function UserManagement() {
                   <TableRow key={user.id}>
                     <TableCell className="font-medium">{user.nombre_apellido || user.email}</TableCell>
                     <TableCell>
-                      <Badge variant={getRoleColor(user.role as UserRole)}>
-                        {getRoleLabel(user.role as UserRole)}
+                      <Badge variant={getRoleColor(user.role)}>
+                        {getRoleLabel(user.role)}
                       </Badge>
                     </TableCell>
                     <TableCell>

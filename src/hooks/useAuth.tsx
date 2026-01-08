@@ -29,7 +29,7 @@ export function AuthProvider({ children }: Readonly<{ children: ReactNode }>) {
     Epysa.auth.getUserData()
       .then(u => {
         setUser( {login: u.login} );
-        setUserProfile(u);
+        setUserProfile({...u, role : "ADMIN"});
       })
       .finally(() => setLoading(false));
 

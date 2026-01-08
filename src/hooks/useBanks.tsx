@@ -1,5 +1,5 @@
+import { exec } from '@/integrations/epy/EpysaApi';
 import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
 
 export const useBanks = () => {
   const [banks, setBanks] = useState<string[]>([]);
@@ -13,13 +13,7 @@ export const useBanks = () => {
   const fetchBanks = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('bank_executives')
-        .select('bank_name')
-        .order('bank_name');
-
-      if (error) throw error;
-
+      const data = (await exec('frwrd/list_bank_executives')).data as { bank_name: string }[];
       // Get unique bank names
       const uniqueBanks = [...new Set(data.map(item => item.bank_name))];
       setBanks(uniqueBanks);

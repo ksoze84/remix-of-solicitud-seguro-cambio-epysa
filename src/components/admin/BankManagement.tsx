@@ -6,14 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { BankExecutive } from "@/types";
-import { supabase } from "@/integrations/supabase/client";
 import { bankExecutiveSchema } from "@/schemas/bankSchema";
 import { secureLogger } from "@/utils/secureLogger";
+import { exec } from "@/integrations/epy/EpysaApi";
+import { useAuth } from "@/hooks/useAuth";
 
 export default function BankManagement() {
+  const { userProfile } = useAuth();
   const [executives, setExecutives] = useState<BankExecutive[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -33,12 +34,8 @@ export default function BankManagement() {
   const fetchExecutives = async () => {
     try {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('bank_executives')
-        .select('*')
-        .order('bank_name');
 
-      if (error) throw error;
+      const data = (await exec('frwrd/list_bank_executives')).data;
 
       // Map database fields to interface fields
       const mappedExecutives: BankExecutive[] = (data || []).map(exec => ({
@@ -78,17 +75,15 @@ export default function BankManagement() {
     }
 
     try {
-      const { data, error } = await supabase
-        .from('bank_executives')
-        .insert([{
-          name: newExecutive.name,
-          contact_number: newExecutive.contactNumber,
-          bank_name: newExecutive.bankName
-        }])
-        .select()
-        .single();
 
-      if (error) throw error;
+      await exec('frwrd/save_bank_executive', {
+        name: newExecutive.name,
+        contact_number: newExecutive.contactNumber,
+        bank_name: newExecutive.bankName,
+        user_id: userProfile?.login
+      });
+
+
 
       await fetchExecutives(); // Refresh the list
 
@@ -134,16 +129,14 @@ export default function BankManagement() {
     }
 
     try {
-      const { error } = await supabase
-        .from('bank_executives')
-        .update({
-          name: editingExecutive.name,
-          contact_number: editingExecutive.contactNumber,
-          bank_name: editingExecutive.bankName
-        })
-        .eq('id', editingExecutive.id);
 
-      if (error) throw error;
+      await exec('frwrd/save_bank_executive', {
+        id: editingExecutive.id,
+        name: editingExecutive.name,
+        contact_number: editingExecutive.contactNumber,
+        bank_name: editingExecutive.bankName,
+        user_id: userProfile?.login
+      });
 
       await fetchExecutives(); // Refresh the list
 
@@ -170,12 +163,8 @@ export default function BankManagement() {
     }
 
     try {
-      const { error } = await supabase
-        .from('bank_executives')
-        .delete()
-        .eq('id', executiveId);
 
-      if (error) throw error;
+      await exec('frwrd/delete_bank_executive', { id: executiveId, user_id: userProfile?.login });
 
       await fetchExecutives(); // Refresh the list
 
@@ -194,8 +183,8 @@ export default function BankManagement() {
   };
 
   // Group and sort executives by bank
-  const groupedExecutives = executives
-    .sort((a, b) => a.bankName.localeCompare(b.bankName))
+  const groupedExecutives = executives //NOSONAR
+    .sort((a, b) => a.bankName.localeCompare(b.bankName)) //NOSONAR
     .reduce((groups, executive) => {
       const bank = executive.bankName;
       if (!groups[bank]) {
@@ -380,7 +369,7 @@ export default function BankManagement() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => handleDeleteExecutive(executive.id!, executive.name)}
+                          onClick={() => handleDeleteExecutive(executive.id, executive.name)}
                           className="text-destructive hover:text-destructive"
                         >
                           <Trash2 className="h-4 w-4" />

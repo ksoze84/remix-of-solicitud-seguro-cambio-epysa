@@ -7,12 +7,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PaymentForm } from "./payment-form";
-import { CoverageIndicator } from "@/components/ui/coverage-indicator";
 import { CurrencyRequest, Payment, RequestStatus } from "@/types";
 import { validateRUT, formatRUT, validatePositiveNumber } from "@/utils/validation";
 import { calculateCoverage, formatCurrency } from "@/utils/coverage";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { exec } from "@/integrations/epy/EpysaApi";
+
 
 interface RequestFormProps {
   request?: CurrencyRequest;
@@ -21,7 +21,7 @@ interface RequestFormProps {
   isAdmin?: boolean;
 }
 
-export function RequestForm({ request, onSave, onCancel, isAdmin = false }: RequestFormProps) {
+export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Readonly<RequestFormProps>) {
   const { toast } = useToast();
   const [formData, setFormData] = useState({
     cliente: request?.cliente || '',
@@ -38,20 +38,20 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Requ
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
-  const [sellers, setSellers] = useState<Array<{ id: string; user_id: string | null; nombre_apellido: string; email: string }>>([]);
+  const [sellers, setSellers] = useState<Array<{ id: string; user_id: string | null; nombre_apellido: string; email?: string }>>([]);
 
   // Parse Chilean format number (1.234,56) to float - defined early for coverage calc
   const parseChileanNumberEarly = (value: string): number => {
     if (!value) return 0;
     const normalized = value.replace(/\./g, '').replace(',', '.');
-    const num = parseFloat(normalized);
-    return isNaN(num) ? 0 : num;
+    const num = Number.parseFloat(normalized);
+    return Number.isNaN(num) ? 0 : num;
   };
 
   const coverage = calculateCoverage(
     payments, 
     undefined, 
-    parseFloat(formData.tcReferencial) || 950,
+    Number.parseFloat(formData.tcReferencial) || 950,
     parseChileanNumberEarly(formData.montoNegocioUsd)
   );
 
@@ -59,19 +59,15 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Requ
   useEffect(() => {
     if (isAdmin) {
       const fetchSellers = async () => {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('id, user_id, nombre_apellido, email')
-          .eq('role', 'VENDEDOR')
-          .not('user_id', 'is', null)
-          .order('nombre_apellido');
-        
-        if (!error && data) {
+
+        const data = (await exec('ECP_ListaVendedores_Consola')).data;
+
+        if (data) {
           setSellers(data.map(s => ({ 
-            id: s.id,
-            user_id: s.user_id,
-            nombre_apellido: s.nombre_apellido || s.email,
-            email: s.email 
+            id: s.Entidad_comercial,
+            user_id: s.Entidad_comercial,
+            nombre_apellido: s.Nombre,
+            email: s.email || s.nombre 
           })));
         }
       };
@@ -81,7 +77,7 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Requ
 
   // Update internal numbers array when units change
   useEffect(() => {
-    const unitsCount = parseInt(formData.unidades) || 1;
+    const unitsCount = Number.parseInt(formData.unidades) || 1;
     setNumerosInternos(prev => {
       const newArray = [...prev];
       if (newArray.length < unitsCount) {
@@ -155,8 +151,8 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Requ
     if (!value) return 0;
     // Remove dots (thousands separator) and replace comma (decimal separator) with dot
     const normalized = value.replace(/\./g, '').replace(',', '.');
-    const num = parseFloat(normalized);
-    return isNaN(num) ? 0 : num;
+    const num = Number.parseFloat(normalized);
+    return Number.isNaN(num) ? 0 : num;
   };
 
   const handleInputChange = (field: string, value: string) => {
@@ -241,7 +237,7 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Requ
           ? "Los cambios han sido guardados como borrador"
           : "La solicitud ha sido enviada para revisión"
       });
-    } catch (error) {
+    } catch {
       toast({
         title: "Error",
         description: "Ocurrió un error al guardar la solicitud",
@@ -274,7 +270,7 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Requ
                 </SelectTrigger>
                 <SelectContent>
                   {sellers.map((seller) => (
-                    <SelectItem key={seller.id} value={seller.user_id!}>
+                    <SelectItem key={seller.id} value={seller.user_id}>
                       {seller.nombre_apellido}
                     </SelectItem>
                   ))}

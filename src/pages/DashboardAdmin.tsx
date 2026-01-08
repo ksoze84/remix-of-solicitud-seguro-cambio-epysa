@@ -4,12 +4,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { CurrencyRequest, RequestStatus } from "@/types";
 import { formatCurrency, calculateCoverage, formatNumber } from "@/utils/coverage";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/hooks/useAuth";
+import { exec } from "@/integrations/epy/EpysaApi";
+
 
 export default function DashboardAdmin() {
-  const { userProfile } = useAuth();
   const { toast } = useToast();
   const [requests, setRequests] = useState<CurrencyRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -18,12 +17,7 @@ export default function DashboardAdmin() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const { data, error } = await supabase
-          .from('currency_requests')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (error) throw error;
+        const data = (await exec('frwrd/list_currency_requests')).data;
 
         // Convert database format to app format
         const convertedRequests: CurrencyRequest[] = data.map(req => ({
@@ -31,18 +25,18 @@ export default function DashboardAdmin() {
           sellerId: req.user_id,
           cliente: req.cliente,
           rut: req.rut,
-          montoNegocioUsd: parseFloat(req.monto_negocio_usd.toString()),
+          montoNegocioUsd: Number.parseFloat(req.monto_negocio_usd.toString()),
           unidades: req.unidades,
-          numerosInternos: req.numeros_internos,
+          numerosInternos: JSON.parse(req.numeros_internos) as string[],
           numeroSie: (req as any).numero_sie,
-          tcCliente: (req as any).tc_cliente ? parseFloat((req as any).tc_cliente.toString()) : undefined,
+          tcCliente: (req as any).tc_cliente ? Number.parseFloat((req as any).tc_cliente.toString()) : undefined,
           notas: req.notas,
           banco: req.banco,
           diasForward: req.dias_forward,
-          porcentajeCobertura: req.porcentaje_cobertura ? parseFloat(req.porcentaje_cobertura.toString()) : undefined,
-          puntosForwards: req.puntos_forwards ? parseFloat(req.puntos_forwards.toString()) : undefined,
+          porcentajeCobertura: req.porcentaje_cobertura ? Number.parseFloat(req.porcentaje_cobertura.toString()) : undefined,
+          puntosForwards: req.puntos_forwards ? Number.parseFloat(req.puntos_forwards.toString()) : undefined,
           fechaVencimiento: req.fecha_vencimiento ? new Date(req.fecha_vencimiento) : undefined,
-          payments: req.payments as any[],
+          payments: JSON.parse(req.payments) as any[],
           estado: req.estado as RequestStatus,
           createdAt: new Date(req.created_at),
           updatedAt: new Date(req.updated_at)
@@ -150,11 +144,11 @@ export default function DashboardAdmin() {
   // 3. Días Forward - Vigentes y Totales
   const diasForwardVigentes = vigentesRequests
     .filter(r => r.diasForward)
-    .map(r => r.diasForward!);
+    .map(r => r.diasForward);
   
   const diasForwardTotales = allApprovedRequests
     .filter(r => r.diasForward)
-    .map(r => r.diasForward!);
+    .map(r => r.diasForward);
 
   const diasStats = {
     vigentes: {
@@ -191,8 +185,8 @@ export default function DashboardAdmin() {
       return vencimiento >= hoy && vencimiento <= treintaDias;
     })
     .sort((a, b) => {
-      const dateA = new Date(a.fechaVencimiento!);
-      const dateB = new Date(b.fechaVencimiento!);
+      const dateA = new Date(a.fechaVencimiento);
+      const dateB = new Date(b.fechaVencimiento);
       return dateA.getTime() - dateB.getTime();
     });
 
@@ -407,7 +401,7 @@ export default function DashboardAdmin() {
                     <div className="flex-1">
                       <p className="font-medium text-sm">{request.cliente}</p>
                       <p className="text-xs text-muted-foreground">
-                        {new Date(request.fechaVencimiento!).toLocaleDateString('es-CL')}
+                        {new Date(request.fechaVencimiento).toLocaleDateString('es-CL')}
                       </p>
                     </div>
                     <div className="text-right">

@@ -3,7 +3,7 @@ import { RequestForm } from "@/components/forms/request-form";
 import { CurrencyRequest, RequestStatus, UserRole } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { Epysa } from "@/integrations/epy/EpysaApi";
+import { exec } from "@/integrations/epy/EpysaApi";
 
 export default function NewRequest() {
   const navigate = useNavigate();
@@ -35,7 +35,7 @@ export default function NewRequest() {
       };
 
 
-      await Epysa.data.exec('frwrd/save_currency_request', dbRequest);
+      await exec('frwrd/save_currency_request', dbRequest);
       
 
       toast({
