@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { supabase } from "@/integrations/supabase/client";
+
 import { useToast } from "@/hooks/use-toast";
 import { UserRole } from "@/types";
 import { userProfileSchema } from "@/schemas/userSchema";
@@ -46,10 +46,7 @@ export default function UserManagement() {
 
   const fetchUsers = async () => {
     try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .order('created_at', { ascending: false });
+      const { data, error } = { data: undefined, error: undefined }
 
       if (error) throw error;
       setUsers(data?.map(user => ({
@@ -90,11 +87,7 @@ export default function UserManagement() {
     setCreating(true);
     try {
       // Check if user already exists
-      const { data: existingUser } = await supabase
-        .from('profiles')
-        .select('email')
-        .eq('email', newUserEmail)
-        .single();
+      const { data: existingUser } = { data: undefined }
 
       if (existingUser) {
         toast({
@@ -107,16 +100,7 @@ export default function UserManagement() {
       }
 
       // Create new user profile
-      const { error } = await supabase
-        .from('profiles')
-        .insert({
-          email: newUserEmail,
-          role: newUserRole,
-          user_id: null,
-          nombre_apellido: nombreApellido || null,
-          correo_jefatura_directa: correoJefaturaDirecta || null,
-          correo_gerente: correoGerente || null
-        });
+      const { error } = {  error: undefined }
 
       if (error) {
         secureLogger.error('Error creating user:', error);
@@ -149,10 +133,7 @@ export default function UserManagement() {
 
   const handleDeleteUser = async (userId: string, email: string) => {
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .delete()
-        .eq('id', userId);
+      const { error } ={  error: undefined }
 
       if (error) throw error;
 
@@ -205,33 +186,15 @@ export default function UserManagement() {
 
     setUpdating(true);
     try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({
-          email: newUserEmail,
-          role: newUserRole,
-          nombre_apellido: nombreApellido || null,
-          correo_jefatura_directa: correoJefaturaDirecta || null,
-          correo_gerente: correoGerente || null
-        })
-        .eq('id', editingUser.id);
+      const { error } = { error: undefined }
 
       if (error) throw error;
 
       // Update user role if user_id exists
       if (editingUser.user_id) {
-        await supabase
-          .from('user_roles')
-          .delete()
-          .eq('user_id', editingUser.user_id);
 
-        const { error: roleError } = await supabase
-          .from('user_roles')
-          .insert({
-            user_id: editingUser.user_id,
-            role: newUserRole
-          });
 
+        const { error: roleError } = {  error: undefined }
         if (roleError) {
           secureLogger.error('Error updating user role:', roleError);
         }

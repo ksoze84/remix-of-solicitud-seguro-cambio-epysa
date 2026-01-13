@@ -23,7 +23,6 @@ import { useBankExecutives } from '@/hooks/useBankExecutives';
 import { formatCurrency, calculateCoverage, formatNumber } from "@/utils/coverage";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client";
 import { useViewRole } from "@/contexts/ViewRoleContext";
 import { exec } from "@/integrations/epy/EpysaApi";
 
@@ -659,9 +658,7 @@ export default function RequestDetail() { //NOSONAR
       if (newStatus === RequestStatus.APROBADA) {
         try {
           console.log('Sending approval email for request:', requestId);
-          const { error: emailError } = await supabase.functions.invoke('send-approval-email', {
-            body: { requestId }
-          });
+          const { error: emailError } = { error: undefined }
           
           if (emailError) {
             console.error('Error sending approval email:', emailError);

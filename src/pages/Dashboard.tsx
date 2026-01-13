@@ -10,7 +10,6 @@ import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { CurrencyRequest, UserRole, RequestStatus } from "@/types";
 import { formatCurrency, calculateCoverage, formatNumber } from "@/utils/coverage";
-import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useViewRole } from "@/contexts/ViewRoleContext";

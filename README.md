@@ -2,6 +2,8 @@
 
 ## Project info
 
+This project is to detail and manage currency exchange insurance requests.
+
 **URL**: https://lovable.dev/projects/00a45dcd-f220-4523-b609-f2bc04fcb736
 
 ## How can I edit this code?

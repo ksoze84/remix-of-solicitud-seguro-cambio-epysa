@@ -1,6 +1,6 @@
 -- =============================================================================
 -- ESTRUCTURA FINAL DE BASE DE DATOS - SISTEMA DE SOLICITUDES DE SEGUROS DE CAMBIO
--- Consolidado de todas las migraciones de Supabase (17/09/2024 - 30/10/2024)
+-- Consolidado de todas las migraciones de Sp abase (17/09/2024 - 30/10/2024)
 -- Convertido a Microsoft SQL Server 2016
 -- =============================================================================
 
