@@ -88,7 +88,8 @@ export function PaymentForm({ payments, onChange, disabled = false, totalNegocio
   const validatePayment = (payment: Payment, index: number) => {
     const newErrors: Record<string, string> = {};
 
-    if (!validatePositiveNumber(payment.montoClp)) {
+    // Skip validation if this payment uses the remaining balance (auto-calculated)
+    if (!payment.isRemainingBalance && !validatePositiveNumber(payment.montoClp)) {
       newErrors[`${index}-montoClp`] = "Debe ser un monto válido mayor a 0";
     }
 

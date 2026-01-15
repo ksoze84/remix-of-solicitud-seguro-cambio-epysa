@@ -42,6 +42,11 @@ export interface Payment {
   updatedAt?: Date;
 }
 
+export interface NumeroInterno {
+  numeroInterno: number;
+  modelo: string;
+}
+
 export interface CurrencyRequest {
   id?: string;
   sellerId: string;
@@ -50,7 +55,7 @@ export interface CurrencyRequest {
   rut: string;
   montoNegocioUsd: number;
   unidades: number;
-  numerosInternos?: string[];
+  numerosInternos?: NumeroInterno[];
   totalNegocioClp?: number;
   tcCliente?: number;
   banco?: string;
@@ -62,6 +67,7 @@ export interface CurrencyRequest {
   tcAllIn?: number;
   tcReferencial?: number;
   numeroSie?: string;
+  requestNumber?: string;
   notas?: string;
   payments: Payment[];
   createdAt?: Date;

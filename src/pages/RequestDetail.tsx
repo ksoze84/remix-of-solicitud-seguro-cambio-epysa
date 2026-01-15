@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Save, Check, X, Download, CalendarIcon } from "lucide-react";
+import { ArrowLeft, Save, Check, X, Download, CalendarIcon, Send } from "lucide-react";
 import { format, differenceInDays } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { CoverageIndicator } from "@/components/ui/coverage-indicator";
-import { CurrencyRequest, UserRole, RequestStatus, PAYMENT_TYPE_LABELS, Payment } from "@/types";
+import { CurrencyRequest, UserRole, RequestStatus, PAYMENT_TYPE_LABELS, Payment, NumeroInterno } from "@/types";
 import { PaymentForm } from "@/components/forms/payment-form";
 import { useBanks } from "@/hooks/useBanks";
 import { useBankExecutives } from '@/hooks/useBankExecutives';
@@ -35,13 +35,6 @@ export default function RequestDetail() { //NOSONAR
   const { banks } = useBanks();
   const [request, setRequest] = useState<CurrencyRequest | null>(null);
   const [requestNumber, setRequestNumber] = useState<string>("");
-
-  if (!authUser || !userProfile || !id) return null;
-
-  const user = {
-    email: authUser.email || '',
-    role: userProfile.role === 'ADMIN' ? UserRole.ADMIN : (userProfile.role === 'COORDINADOR' ? UserRole.COORDINADOR : UserRole.VENDEDOR)
-  };
 
   const requestId = id;
   const [isEditing, setIsEditing] = useState(false);
@@ -62,13 +55,12 @@ export default function RequestDetail() { //NOSONAR
   const [approvalDate, setApprovalDate] = useState<Date | undefined>();
   const [porcentajeCobertura, setPorcentajeCobertura] = useState([0]);
   const [banco, setBanco] = useState("");
-  const { executives: bankExecutives, loading: executivesLoading } = useBankExecutives(banco);
   const [tcCliente, setTcCliente] = useState("");
   const [tcSpot, setTcSpot] = useState("");
   const [puntosForwards, setPuntosForwards] = useState("");
   const [tcAllIn, setTcAllIn] = useState("");
   const [numeroSie, setNumeroSie] = useState("");
-  const [numerosInternos, setNumerosInternos] = useState<string[]>([]);
+  const [numerosInternos, setNumerosInternos] = useState<NumeroInterno[]>([]);
 
   // Bank comparison states
   const [selectedBank1, setSelectedBank1] = useState("SCOTIABANK");
@@ -108,17 +100,24 @@ export default function RequestDetail() { //NOSONAR
   const [recargo2, setRecargo2] = useState("1");
   const [recargo3, setRecargo3] = useState("1");
 
+
+  const user = {
+    email: authUser.email || '',
+    role: getUserRole(userProfile.role)
+  };
+
+
   // Calculate TC All-in for each bank
   const calculateTcAllIn = (tcSpot: string, puntosForward: string): number => {
-    const spot = parseFloat(tcSpot) || 0;
-    const puntos = parseFloat(puntosForward) || 0;
+    const spot = Number.parseFloat(tcSpot) || 0;
+    const puntos = Number.parseFloat(puntosForward) || 0;
     return spot + puntos;
   };
 
   // Calculate TC Cliente (Costo + Recargo)
   const calculateTcCliente = (tcSpot: string, puntosForward: string, recargo: string): number => {
     const tcAllIn = calculateTcAllIn(tcSpot, puntosForward);
-    const recargoValue = parseFloat(recargo) || 0;
+    const recargoValue = Number.parseFloat(recargo) || 0;
     return tcAllIn + recargoValue;
   };
 
@@ -231,9 +230,9 @@ export default function RequestDetail() { //NOSONAR
       setNumerosInternos(prev => {
         const newArray = [...prev];
         if (newArray.length < unitsCount) {
-          // Add empty strings for new units
+          // Add empty objects for new units
           while (newArray.length < unitsCount) {
-            newArray.push('');
+            newArray.push({ numeroInterno: 0, modelo: '' });
           }
         } else if (newArray.length > unitsCount) {
           // Remove excess internal numbers
@@ -267,12 +266,16 @@ export default function RequestDetail() { //NOSONAR
           tcAllIn: data.tc_all_in ? Number.parseFloat(data.tc_all_in.toString()) : undefined,
           tcReferencial: data.tc_referencial ? Number.parseFloat(data.tc_referencial.toString()) : undefined,
           numeroSie: data.numero_sie || undefined,
-          numerosInternos: (JSON.parse(data.numeros_internos) || []) as string[],
+          requestNumber: data.request_number,
+          numerosInternos: (JSON.parse(data.numeros_internos) || []) as NumeroInterno[],
           payments: (JSON.parse(data.payments) || []) as any[],
           notas: data.notas,
           createdAt: new Date(data.created_at),
           updatedAt: new Date(data.updated_at)
         };
+
+        setRequest(convertedRequest);
+        setRequestNumber(convertedRequest.requestNumber || '');
 
         setRequest(convertedRequest);
         
@@ -357,17 +360,6 @@ export default function RequestDetail() { //NOSONAR
         setEditUnidades(convertedRequest.unidades.toString());
         setEditTcReferencial(convertedRequest.tcReferencial?.toString() || "");
         setEditPayments([...convertedRequest.payments]);
-        
-        // Calculate request number based on creation date
-        const allRequests = (await exec('frwrd/list_currency_requests')).data;
-        
-        if (allRequests) {
-          const requestIndex = allRequests.findIndex(r => r.id === requestId);
-          if (requestIndex !== -1) {
-            const formattedNumber = `#${String(requestIndex + 1).padStart(4, '0')}`;
-            setRequestNumber(formattedNumber);
-          }
-        }
 
         // Fetch approval date from audit_logs for approved requests
         if (convertedRequest.estado === RequestStatus.APROBADA) {
@@ -444,7 +436,7 @@ export default function RequestDetail() { //NOSONAR
         tc_spot: Number.parseFloat(tcSpot) || null,
         puntos_forwards: Number.parseFloat(puntosForwards) || null,
         tc_all_in: Number.parseFloat(tcAllIn) || null,
-        numeros_internos: numerosInternos.filter(n => n.trim() !== ""),
+        numeros_internos: numerosInternos.filter(n => n.numeroInterno > 0),
         payments: editPayments as any,
         updated_at: new Date().toISOString(),
         user_id : authUser.login
@@ -461,7 +453,7 @@ export default function RequestDetail() { //NOSONAR
         puntosForwards: Number.parseFloat(puntosForwards) || undefined,
         tcAllIn: Number.parseFloat(tcAllIn) || undefined,
         numeroSie: numeroSie || undefined,
-        numerosInternos: numerosInternos.filter(n => n.trim() !== ""),
+        numerosInternos: numerosInternos.filter(n => n.numeroInterno > 0),
         payments: [...editPayments],
         updatedAt: new Date()
       }));
@@ -507,7 +499,7 @@ export default function RequestDetail() { //NOSONAR
         monto_negocio_usd: Number.parseFloat(editMontoNegocioUsd) || 0,
         unidades: Number.parseInt(editUnidades) || 0,
         tc_referencial: editTcReferencial ? Number.parseFloat(editTcReferencial) : null,
-        numeros_internos: numerosInternos.filter(n => n.trim() !== ''),
+        numeros_internos: numerosInternos.filter(n => n.numeroInterno > 0),
         payments: editPayments as any,
         updated_at: new Date().toISOString(),
         user_id : authUser.login
@@ -520,7 +512,7 @@ export default function RequestDetail() { //NOSONAR
         montoNegocioUsd: Number.parseFloat(editMontoNegocioUsd) || 0,
         unidades: Number.parseInt(editUnidades) || 0,
         tcReferencial: editTcReferencial ? Number.parseFloat(editTcReferencial) : undefined,
-        numerosInternos: numerosInternos.filter(n => n.trim() !== ''),
+        numerosInternos: numerosInternos.filter(n => n.numeroInterno > 0),
         payments: [...editPayments],
         updatedAt: new Date()
       } : null);
@@ -728,7 +720,7 @@ export default function RequestDetail() { //NOSONAR
       <html>
         <head>
           <meta charset="UTF-8">
-          <title>Solicitud ${requestNumber || request.id}</title>
+          <title>Solicitud ${requestNumber ? `#${requestNumber}` : `#${request.id}`}</title>
           <style>
             @page {
               margin: 1cm;
@@ -911,7 +903,7 @@ export default function RequestDetail() { //NOSONAR
               <img src="${logoUrl}" alt="SSC EPpysa" class="pdf-logo" />
               <div class="pdf-title-section">
                 <div class="pdf-title">Solicitud de Divisas</div>
-                <div class="pdf-subtitle">Folio: ${requestNumber || request.id}</div>
+                <div class="pdf-subtitle">Folio: ${requestNumber ? `#${requestNumber}` : `#${request.id}`}</div>
                 <div class="pdf-subtitle">${format(new Date(), 'dd/MM/yyyy HH:mm')}</div>
                 <span class="pdf-status-badge pdf-status-${request.estado.toLowerCase().replace(/_/g, '-')}">
                   ${request.estado.replace(/_/g, ' ')}
@@ -972,7 +964,7 @@ export default function RequestDetail() { //NOSONAR
                   <div class="pdf-grid" style="margin-top: 8px;">
                     <div class="pdf-field">
                       <div class="pdf-field-label">Números Internos</div>
-                      <div class="pdf-field-value">${numerosInternos.length > 0 ? numerosInternos.filter(n => n).join(', ') || '-' : '-'}</div>
+                      <div class="pdf-field-value">${numerosInternos.length > 0 ? numerosInternos.filter(n => n.numeroInterno > 0).map(n => `${n.numeroInterno}${n.modelo ? ` (${n.modelo})` : ''}`).join(', ') || '-' : '-'}</div>
                     </div>
                     <div class="pdf-field">
                       <div class="pdf-field-label">Número SIE</div>
@@ -1133,7 +1125,7 @@ export default function RequestDetail() { //NOSONAR
               Volver
             </Button>
             <div>
-              <h1 className="text-2xl font-bold">Solicitud {requestNumber || `#${request.id}`}</h1>
+              <h1 className="text-2xl font-bold">Solicitud {requestNumber ? `#${requestNumber}` : `#${request.id}`}</h1>
               <p className="text-muted-foreground">
                 Creada el {request.createdAt?.toLocaleDateString('es-CL')}
                 {request.updatedAt && request.updatedAt > request.createdAt! && (
@@ -1283,14 +1275,18 @@ export default function RequestDetail() { //NOSONAR
                         </Label>
                         <Input
                           id={`numeroInterno${index}`}
-                          value={numero}
+                          type="number"
+                          value={numero.numeroInterno || ''}
                           onChange={(e) => {
                             const newNumbers = [...numerosInternos];
-                            newNumbers[index] = e.target.value;
+                            newNumbers[index] = { ...newNumbers[index], numeroInterno: Number.parseInt(e.target.value) || 0 };
                             setNumerosInternos(newNumbers);
                           }}
                           placeholder={`Ingrese número interno ${index + 1}`}
                         />
+                        {numero.modelo && (
+                          <p className="text-xs text-green-600">✓ {numero.modelo}</p>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -2066,22 +2062,32 @@ export default function RequestDetail() { //NOSONAR
                 {isEditing ? (
                   <div className="space-y-2">
                     {numerosInternos.map((numero, index) => (
-                      <Input
-                        key={index}
-                        value={numero}
-                        onChange={(e) => {
-                          const newNumbers = [...numerosInternos];
-                          newNumbers[index] = e.target.value;
-                          setNumerosInternos(newNumbers);
-                        }}
-                        placeholder={`Número interno ${index + 1}`}
-                      />
+                      <div key={index} className="space-y-1">
+                        <Input
+                          type="number"
+                          value={numero.numeroInterno || ''}
+                          onChange={(e) => {
+                            const newNumbers = [...numerosInternos];
+                            newNumbers[index] = { ...newNumbers[index], numeroInterno: Number.parseInt(e.target.value) || 0 };
+                            setNumerosInternos(newNumbers);
+                          }}
+                          placeholder={`Número interno ${index + 1}`}
+                        />
+                        {numero.modelo && (
+                          <p className="text-xs text-green-600">✓ {numero.modelo}</p>
+                        )}
+                      </div>
                     ))}
                   </div>
                 ) : (
                   <div className="space-y-1">
                     {numerosInternos.length > 0 ? numerosInternos.map((numero, index) => (
-                      <div key={index} className="text-base font-semibold text-foreground">{numero}</div>
+                      <div key={index} className="text-base font-semibold text-foreground">
+                        {numero.numeroInterno}
+                        {numero.modelo && (
+                          <span className="text-xs text-green-600 ml-2">({numero.modelo})</span>
+                        )}
+                      </div>
                     )) : <div className="text-base text-muted-foreground">-</div>}
                   </div>
                 )}
@@ -2144,25 +2150,40 @@ export default function RequestDetail() { //NOSONAR
                       </Button>
                     </div>
                   ) : (
-                    isAdmin && request.estado === RequestStatus.EN_REVISION && (
-                      <div className="flex flex-col gap-2">
+                    <>
+                      {/* Send to Revision button for BORRADOR status */}
+                      {request.estado === RequestStatus.BORRADOR && (
                         <Button 
-                          onClick={() => handleStatusChange(RequestStatus.APROBADA)}
+                          onClick={() => handleStatusChange(RequestStatus.EN_REVISION)}
                           disabled={isSaving}
+                          className="w-full"
                         >
-                          <Check className="h-4 w-4 mr-2" />
-                          Aprobar
+                          <Send className="h-4 w-4 mr-2" />
+                          {isSaving ? "Enviando..." : "Enviar a revisión"}
                         </Button>
-                        <Button 
-                          variant="destructive"
-                          onClick={() => handleStatusChange(RequestStatus.RECHAZADA)}
-                          disabled={isSaving}
-                        >
-                          <X className="h-4 w-4 mr-2" />
-                          Rechazar
-                        </Button>
-                      </div>
-                    )
+                      )}
+                      
+                      {/* Approve/Reject buttons for EN_REVISION status (Admin only) */}
+                      {isAdmin && request.estado === RequestStatus.EN_REVISION && (
+                        <div className="flex flex-col gap-2">
+                          <Button 
+                            onClick={() => handleStatusChange(RequestStatus.APROBADA)}
+                            disabled={isSaving}
+                          >
+                            <Check className="h-4 w-4 mr-2" />
+                            Aprobar
+                          </Button>
+                          <Button 
+                            variant="destructive"
+                            onClick={() => handleStatusChange(RequestStatus.RECHAZADA)}
+                            disabled={isSaving}
+                          >
+                            <X className="h-4 w-4 mr-2" />
+                            Rechazar
+                          </Button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -2172,3 +2193,10 @@ export default function RequestDetail() { //NOSONAR
     </div>
   );
 }
+
+
+const getUserRole = (profileRole: string): UserRole => {
+    if (profileRole === 'ADMIN') return UserRole.ADMIN;
+    if (profileRole === 'COORDINADOR') return UserRole.COORDINADOR;
+    return UserRole.VENDEDOR;
+  };

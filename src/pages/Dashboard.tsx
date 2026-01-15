@@ -49,6 +49,7 @@ export default function Dashboard() {
           unidades: req.unidades,
           numerosInternos: JSON.parse(req.numeros_internos) as string[],
           numeroSie: (req as any).numero_sie,
+          requestNumber: req.request_number,
           tcCliente: (req as any).tc_cliente ? Number.parseFloat((req as any).tc_cliente.toString()) : undefined,
           notas: req.notas,
           banco: req.banco,
@@ -108,18 +109,6 @@ export default function Dashboard() {
   const isAdmin = effectiveRole === UserRole.ADMIN;
   const isCoordinator = effectiveRole === UserRole.COORDINADOR;
 
-  // Format request number (e.g., 0 -> #0001, 42 -> #0043)
-  const formatRequestNumber = (num: number): string => {
-    return `#${String(num + 1).padStart(4, '0')}`;
-  };
-
-  // Create request numbers based on creation date (oldest = 0, newest = highest)
-  const sortedByDate = [...requests].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-  const requestNumbers = sortedByDate.reduce((acc, req, index) => {
-    acc[req.id] = index; // Oldest = 0, newest = n-1
-    return acc;
-  }, {} as Record<string, number>);
-
   // Filter requests based on user role and filters
   const filteredRequests = requests.filter(request => {
     // Role-based filtering: admins and coordinators see all, sellers see only their own
@@ -156,10 +145,8 @@ export default function Dashboard() {
 
     return true;
   }).sort((a, b) => {
-    // Sort by creation date (newest first), then by request number (highest first)
-    const dateCompare = b.createdAt.getTime() - a.createdAt.getTime();
-    if (dateCompare !== 0) return dateCompare;
-    return requestNumbers[b.id] - requestNumbers[a.id];
+    // Sort by creation date (newest first)
+    return b.createdAt.getTime() - a.createdAt.getTime();
   });
 
 
@@ -297,7 +284,7 @@ export default function Dashboard() {
                             </TableCell>
                           )}
                           <TableCell className="font-medium">{request.cliente}</TableCell>
-                          <TableCell>{formatRequestNumber(requestNumbers[request.id])}</TableCell>
+                          <TableCell>{request.requestNumber ? `#${request.requestNumber}` : '-'}</TableCell>
                           {isAdmin ? (
                             <>
                               <TableCell>{formatNumber(request.unidades, 0)}</TableCell>

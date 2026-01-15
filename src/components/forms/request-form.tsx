@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Save, Send } from "lucide-react";
+import { Save, Send, Search } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PaymentForm } from "./payment-form";
-import { CurrencyRequest, Payment, RequestStatus } from "@/types";
+import { CurrencyRequest, Payment, RequestStatus, NumeroInterno } from "@/types";
 import { validateRUT, formatRUT, validatePositiveNumber } from "@/utils/validation";
 import { calculateCoverage, formatCurrency } from "@/utils/coverage";
 import { useToast } from "@/hooks/use-toast";
@@ -31,14 +31,17 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
     tcReferencial: request?.tcCliente?.toString() || '950',
     notas: request?.notas || ''
   });
-  const [numerosInternos, setNumerosInternos] = useState<string[]>(
-    request?.numerosInternos || ['']
+  const [numerosInternos, setNumerosInternos] = useState<NumeroInterno[]>(
+    request?.numerosInternos || [{ numeroInterno: 0, modelo: '' }]
   );
   const [payments, setPayments] = useState<Payment[]>(request?.payments || []);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string>('');
-  const [sellers, setSellers] = useState<Array<{ id: string; user_id: string | null; nombre_apellido: string; email?: string }>>([]);
+  const [isValidatingRut, setIsValidatingRut] = useState(false);
+  const [clientValidated, setClientValidated] = useState(false);
+  const [sellers, setSellers] = useState<Array<{ id: string; user_id: string | null; nombre_apellido: string; email?: string }>>([]); 
+  const [validatingNumeroInterno, setValidatingNumeroInterno] = useState<number | null>(null);
 
   // Parse Chilean format number (1.234,56) to float - defined early for coverage calc
   const parseChileanNumberEarly = (value: string): number => {
@@ -81,9 +84,9 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
     setNumerosInternos(prev => {
       const newArray = [...prev];
       if (newArray.length < unitsCount) {
-        // Add empty strings for new units
+        // Add empty objects for new units
         while (newArray.length < unitsCount) {
-          newArray.push('');
+          newArray.push({ numeroInterno: 0, modelo: '' });
         }
       } else if (newArray.length > unitsCount) {
         // Remove excess internal numbers
@@ -101,8 +104,8 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
       newErrors.selectedUserId = "Debe seleccionar un vendedor";
     }
 
-    if (!formData.cliente.trim()) {
-      newErrors.cliente = "Cliente es requerido";
+    if (!formData.cliente.trim() || (!clientValidated && formData.rut.trim())) {
+      newErrors.cliente = "Debe validar el RUT del cliente";
     }
 
     if (!formData.rut.trim()) {
@@ -126,7 +129,7 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
     // Validate internal numbers if submission
     if (forSubmission) {
       numerosInternos.forEach((numero, index) => {
-        if (!numero.trim()) {
+        if (!numero.numeroInterno || numero.numeroInterno <= 0) {
           newErrors[`numeroInterno${index}`] = `Número interno ${index + 1} es requerido`;
         }
       });
@@ -187,12 +190,88 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
   const handleRUTChange = (value: string) => {
     const formatted = formatRUT(value);
     handleInputChange('rut', formatted);
+    // Reset client validation when RUT changes
+    if (clientValidated) {
+      setClientValidated(false);
+      handleInputChange('cliente', '');
+    }
+  };
+
+  const handleValidateRut = async () => {
+    if (!formData.rut.trim()) {
+      toast({
+        title: "Error",
+        description: "Debe ingresar un RUT",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (!validateRUT(formData.rut)) {
+      toast({
+        title: "Error",
+        description: "El RUT ingresado no es válido",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsValidatingRut(true);
+    
+    try {
+      // Clean RUT: remove dots and hyphens
+      const cleanRut = formData.rut.replace(/[.-]/g, '');
+      
+      const result = await exec('CLI_ListaClientes', { cCodigo: cleanRut });
+      
+      if (result.data && result.data.length > 0) {
+        const clientData = result.data[0];
+        const apellidos = clientData.Apellidos_persona_o_nombre_empresa || '';
+        const nombres = clientData.Nombres_persona || '';
+        
+        // Combine names, prioritizing apellidos (company name or last name)
+        const clientName = nombres.trim() 
+          ? `${apellidos.trim()} ${nombres.trim()}`.trim()
+          : apellidos.trim();
+        
+        if (clientName) {
+          handleInputChange('cliente', clientName);
+          setClientValidated(true);
+          toast({
+            title: "Cliente encontrado",
+            description: `Cliente: ${clientName}`
+          });
+        } else {
+          toast({
+            title: "Cliente no encontrado",
+            description: "No se encontraron datos del cliente para este RUT",
+            variant: "destructive"
+          });
+        }
+      } else {
+        toast({
+          title: "Cliente no encontrado",
+          description: "No se encontró un cliente con este RUT",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error('Error validating RUT:', error);
+      toast({
+        title: "Error",
+        description: "Error al validar el RUT. Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsValidatingRut(false);
+    }
   };
 
   const handleNumeroInternoChange = (index: number, value: string) => {
+    const numValue = Number.parseInt(value, 10) || 0;
     setNumerosInternos(prev => {
       const newArray = [...prev];
-      newArray[index] = value;
+      newArray[index] = { ...newArray[index], numeroInterno: numValue, modelo: '' };
       return newArray;
     });
     
@@ -204,6 +283,73 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
         delete newErrors[fieldName];
         return newErrors;
       });
+    }
+  };
+
+  const handleValidateNumeroInterno = async (index: number) => {
+    const numeroInterno = numerosInternos[index];
+    
+    if (!numeroInterno.numeroInterno) {
+      toast({
+        title: "Error",
+        description: "Debe ingresar un número interno",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const numeroInt = numeroInterno.numeroInterno;
+    if (Number.isNaN(numeroInt) || numeroInt <= 0) {
+      toast({
+        title: "Error",
+        description: "El número interno debe ser un número válido mayor a 0",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setValidatingNumeroInterno(index);
+    
+    try {
+      const result = await exec('frwrd/producto_individual', { nInterno: numeroInt });
+      
+      if (result.data && result.data.length > 0) {
+        const productData = result.data[0];
+        const modeloChasis = productData.Nombre || '';
+        
+        if (modeloChasis) {
+          setNumerosInternos(prev => {
+            const newArray = [...prev];
+            newArray[index] = { ...newArray[index], modelo: modeloChasis };
+            return newArray;
+          });
+          toast({
+            title: "Producto encontrado",
+            description: `Modelo: ${modeloChasis}`
+          });
+        } else {
+          toast({
+            title: "Producto sin modelo",
+            description: "El producto no tiene modelo de chasis asignado",
+            variant: "destructive"
+          });
+        }
+      } else {
+        toast({
+          title: "Producto no encontrado",
+          description: "No se encontró un producto con este número interno",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error('Error validating numero interno:', error);
+      toast({
+        title: "Error",
+        description: "Error al validar el número interno. Intente nuevamente.",
+        variant: "destructive"
+      });
+    } finally {
+      setValidatingNumeroInterno(null);
     }
   };
 
@@ -223,13 +369,13 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
         montoNegocioUsd: parseChileanNumber(formData.montoNegocioUsd),
         unidades: parseInt(formData.unidades),
         tcReferencial: parseFloat(formData.tcReferencial),
-        numerosInternos: numerosInternos.filter(n => n.trim() !== ""),
+        numerosInternos: numerosInternos.filter(n => n.numeroInterno > 0),
         notas: formData.notas.trim() || undefined,
         payments: payments,
         estado: status
       };
 
-      await onSave(requestData, status, isAdmin ? selectedUserId : undefined);
+      onSave(requestData, status, isAdmin ? selectedUserId : undefined);
       
       toast({
         title: status === RequestStatus.BORRADOR ? "Borrador guardado" : "Solicitud enviada",
@@ -290,32 +436,49 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
+              <Label htmlFor="rut">RUT del Cliente *</Label>
+              <div className="flex gap-2">
+                <Input
+                  id="rut"
+                  value={formData.rut}
+                  onChange={(e) => handleRUTChange(e.target.value)}
+                  placeholder="12.345.678-9"
+                  disabled={!canEdit}
+                  className={errors.rut ? "border-destructive" : ""}
+                />
+                <Button
+                  type="button"
+                  onClick={handleValidateRut}
+                  disabled={!canEdit || isValidatingRut || !formData.rut.trim()}
+                  variant="outline"
+                  size="default"
+                >
+                  <Search className="h-4 w-4 mr-1" />
+                  {isValidatingRut ? "buscando..." : "buscar"}
+                </Button>
+              </div>
+              {errors.rut && (
+                <p className="text-xs text-destructive">{errors.rut}</p>
+              )}
+            </div>
+
+            <div className="space-y-2">
               <Label htmlFor="cliente">Cliente *</Label>
               <Input
                 id="cliente"
                 value={formData.cliente}
                 onChange={(e) => handleInputChange('cliente', e.target.value)}
-                placeholder="Nombre del cliente"
-                disabled={!canEdit}
-                className={errors.cliente ? "border-destructive" : ""}
+                placeholder="Validar RUT para obtener nombre"
+                disabled={true}
+                className={`${
+                  errors.cliente ? "border-destructive" : ""
+                } ${clientValidated ? "bg-green-50 border-green-200" : "bg-muted"}`}
               />
               {errors.cliente && (
                 <p className="text-xs text-destructive">{errors.cliente}</p>
               )}
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="rut">RUT *</Label>
-              <Input
-                id="rut"
-                value={formData.rut}
-                onChange={(e) => handleRUTChange(e.target.value)}
-                placeholder="12.345.678-9"
-                disabled={!canEdit}
-                className={errors.rut ? "border-destructive" : ""}
-              />
-              {errors.rut && (
-                <p className="text-xs text-destructive">{errors.rut}</p>
+              {clientValidated && (
+                <p className="text-xs text-green-600">✓ Cliente encontrado</p>
               )}
             </div>
 
@@ -373,7 +536,7 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
             <div className="space-y-2">
               <Label className="text-sm text-muted-foreground">Total del Negocio (CLP)</Label>
               <div className="text-lg font-semibold">
-                {formatCurrency(parseChileanNumber(formData.montoNegocioUsd) * (parseFloat(formData.tcReferencial) || 950))}
+                {formatCurrency(parseChileanNumber(formData.montoNegocioUsd) * (Number.parseFloat(formData.tcReferencial) || 950))}
               </div>
             </div>
           </div>
@@ -389,14 +552,24 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
                   </Label>
                   <Input
                     id={`numeroInterno${index}`}
-                    value={numero}
+                    type="number"
+                    value={numero.numeroInterno || ''}
                     onChange={(e) => handleNumeroInternoChange(index, e.target.value)}
+                    onBlur={() => numero.numeroInterno > 0 && handleValidateNumeroInterno(index)}
                     placeholder={`Ingrese número interno ${index + 1}`}
                     disabled={!canEdit}
-                    className={errors[`numeroInterno${index}`] ? "border-destructive" : ""}
+                    className={`${
+                      errors[`numeroInterno${index}`] ? "border-destructive" : ""
+                    } ${numero.modelo ? "bg-green-50 border-green-200" : ""}`}
                   />
+                  {validatingNumeroInterno === index && (
+                    <p className="text-xs text-muted-foreground">Buscando...</p>
+                  )}
                   {errors[`numeroInterno${index}`] && (
                     <p className="text-xs text-destructive">{errors[`numeroInterno${index}`]}</p>
+                  )}
+                  {numero.modelo && (
+                    <p className="text-xs text-green-600">✓ {numero.modelo}</p>
                   )}
                 </div>
               ))}

@@ -717,8 +717,57 @@ BEGIN
 END
 
 GO
+-- inicial
+CREATE PROCEDURE frwrd.producto_individual
+    @nInterno integer
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    SELECT 
+        p.Nombre
+    FROM 
+        Productos_individuales
+    INNER JOIN 
+        Productos p 
+            ON Productos_individuales.Producto = p.Producto
+    WHERE 
+        Numero_interno_epysa = @nInterno
+
+END
+
+
 
 
 EXEC ECP_ListaVendedores_Consola
 
 Entidad_comercial	Nombre	Tipo
+
+
+
+SELECT * FROM frwrd.currency_requests
+
+ALTER TABLE frwrd.currency_requests
+ADD request_number INT NOT NULL IDENTITY(1,1);
+
+
+SELECT TOP 10 * FROM Usuarios WHERE S_H IS NOT NULL OR S_M IS NOT NULL
+
+SELECT TOP 10 * FROM Entidades_comerciales e
+
+EXEC CLI_ListaClientes
+
+
+EXEC PRI_Lista_productos_individuales
+
+
+SELECT * FROM Productos_individuales
+
+
+SELECT 
+    p.Nombre
+FROM 
+    Productos_individuales
+INNER JOIN 
+    Productos p 
+        ON Productos_individuales.Producto = p.Producto
