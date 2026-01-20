@@ -41,7 +41,8 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
   const [isValidatingRut, setIsValidatingRut] = useState(false);
   const [clientValidated, setClientValidated] = useState(false);
   const [sellers, setSellers] = useState<Array<{ id: string; user_id: string | null; nombre_apellido: string; email?: string }>>([]); 
-  const [validatingNumeroInterno, setValidatingNumeroInterno] = useState<number | null>(null);
+  const [reservedProducts, setReservedProducts] = useState<Array<{ numeroInterno: number; modelo: string }>>([]);
+  const [isLoadingReserved, setIsLoadingReserved] = useState(false);
 
   // Parse Chilean format number (1.234,56) to float - defined early for coverage calc
   const parseChileanNumberEarly = (value: string): number => {
@@ -190,10 +191,14 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
   const handleRUTChange = (value: string) => {
     const formatted = formatRUT(value);
     handleInputChange('rut', formatted);
-    // Reset client validation when RUT changes
+    // Reset client validation and reserved products when RUT changes
     if (clientValidated) {
       setClientValidated(false);
       handleInputChange('cliente', '');
+      setReservedProducts([]);
+      // Reset numeros internos to empty
+      const unitsCount = Number.parseInt(formData.unidades) || 1;
+      setNumerosInternos(new Array(unitsCount).fill(null).map(() => ({ numeroInterno: 0, modelo: '' })));
     }
   };
 
@@ -241,6 +246,25 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
             title: "Cliente encontrado",
             description: `Cliente: ${clientName}`
           });
+          
+          // Fetch reserved products for this client
+          setIsLoadingReserved(true);
+          try {
+            const reservedResult = await exec('frwrd/lista_reservados', { cliente: cleanRut });
+            if (reservedResult.data && reservedResult.data.length > 0) {
+              setReservedProducts(reservedResult.data.map((p: { numeroInterno: number; modelo: string }) => ({
+                numeroInterno: p.numeroInterno,
+                modelo: p.modelo || ''
+              })));
+            } else {
+              setReservedProducts([]);
+            }
+          } catch (err) {
+            console.error('Error fetching reserved products:', err);
+            setReservedProducts([]);
+          } finally {
+            setIsLoadingReserved(false);
+          }
         } else {
           toast({
             title: "Cliente no encontrado",
@@ -269,9 +293,13 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
 
   const handleNumeroInternoChange = (index: number, value: string) => {
     const numValue = Number.parseInt(value, 10) || 0;
+    // Find the modelo from reserved products
+    const selectedProduct = reservedProducts.find(p => p.numeroInterno === numValue);
+    const modelo = selectedProduct?.modelo || '';
+    
     setNumerosInternos(prev => {
       const newArray = [...prev];
-      newArray[index] = { ...newArray[index], numeroInterno: numValue, modelo: '' };
+      newArray[index] = { numeroInterno: numValue, modelo };
       return newArray;
     });
     
@@ -286,71 +314,16 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
     }
   };
 
-  const handleValidateNumeroInterno = async (index: number) => {
-    const numeroInterno = numerosInternos[index];
+  // Get available options for numeroInterno select (exclude already selected ones)
+  const getAvailableProducts = (currentIndex: number) => {
+    const selectedNumerosInternos = new Set(
+      numerosInternos
+        .filter((_, idx) => idx !== currentIndex)
+        .map(n => n.numeroInterno)
+        .filter(n => n > 0)
+    );
     
-    if (!numeroInterno.numeroInterno) {
-      toast({
-        title: "Error",
-        description: "Debe ingresar un número interno",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    const numeroInt = numeroInterno.numeroInterno;
-    if (Number.isNaN(numeroInt) || numeroInt <= 0) {
-      toast({
-        title: "Error",
-        description: "El número interno debe ser un número válido mayor a 0",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setValidatingNumeroInterno(index);
-    
-    try {
-      const result = await exec('frwrd/producto_individual', { nInterno: numeroInt });
-      
-      if (result.data && result.data.length > 0) {
-        const productData = result.data[0];
-        const modeloChasis = productData.Nombre || '';
-        
-        if (modeloChasis) {
-          setNumerosInternos(prev => {
-            const newArray = [...prev];
-            newArray[index] = { ...newArray[index], modelo: modeloChasis };
-            return newArray;
-          });
-          toast({
-            title: "Producto encontrado",
-            description: `Modelo: ${modeloChasis}`
-          });
-        } else {
-          toast({
-            title: "Producto sin modelo",
-            description: "El producto no tiene modelo de chasis asignado",
-            variant: "destructive"
-          });
-        }
-      } else {
-        toast({
-          title: "Producto no encontrado",
-          description: "No se encontró un producto con este número interno",
-          variant: "destructive"
-        });
-      }
-    } catch (error) {
-      console.error('Error validating numero interno:', error);
-      toast({
-        title: "Error",
-        description: "Error al validar el número interno. Intente nuevamente.",
-        variant: "destructive"
-      });
-    } finally {
-      setValidatingNumeroInterno(null);
-    }
+    return reservedProducts.filter(p => !selectedNumerosInternos.has(p.numeroInterno));
   };
 
   const handleSave = async (status: RequestStatus) => {
@@ -544,35 +517,60 @@ export function RequestForm({ request, onSave, onCancel, isAdmin = false }: Read
           {/* Internal Numbers Section */}
           <div className="space-y-4">
             <Label className="text-base font-medium">Números internos</Label>
+            {!clientValidated && (
+              <p className="text-sm text-muted-foreground">Valide el RUT del cliente para ver los productos reservados</p>
+            )}
+            {isLoadingReserved && (
+              <p className="text-sm text-muted-foreground">Cargando productos reservados...</p>
+            )}
+            {clientValidated && !isLoadingReserved && reservedProducts.length === 0 && (
+              <p className="text-sm text-amber-600">No hay productos reservados para este cliente</p>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {numerosInternos.map((numero, index) => (
-                <div key={index} className="space-y-2">
-                  <Label htmlFor={`numeroInterno${index}`}>
-                    Número interno {index + 1} *
-                  </Label>
-                  <Input
-                    id={`numeroInterno${index}`}
-                    type="number"
-                    value={numero.numeroInterno || ''}
-                    onChange={(e) => handleNumeroInternoChange(index, e.target.value)}
-                    onBlur={() => numero.numeroInterno > 0 && handleValidateNumeroInterno(index)}
-                    placeholder={`Ingrese número interno ${index + 1}`}
-                    disabled={!canEdit}
-                    className={`${
-                      errors[`numeroInterno${index}`] ? "border-destructive" : ""
-                    } ${numero.modelo ? "bg-green-50 border-green-200" : ""}`}
-                  />
-                  {validatingNumeroInterno === index && (
-                    <p className="text-xs text-muted-foreground">Buscando...</p>
-                  )}
-                  {errors[`numeroInterno${index}`] && (
-                    <p className="text-xs text-destructive">{errors[`numeroInterno${index}`]}</p>
-                  )}
-                  {numero.modelo && (
-                    <p className="text-xs text-green-600">✓ {numero.modelo}</p>
-                  )}
-                </div>
-              ))}
+              {numerosInternos.map((numero, index) => {
+                const availableProducts = getAvailableProducts(index);
+                const currentProduct = reservedProducts.find(p => p.numeroInterno === numero.numeroInterno);
+                
+                return (
+                  <div key={index} className="space-y-2">
+                    <Label htmlFor={`numeroInterno${index}`}>
+                      Número interno {index + 1} *
+                    </Label>
+                    <Select
+                      value={numero.numeroInterno > 0 ? numero.numeroInterno.toString() : ''}
+                      onValueChange={(value) => handleNumeroInternoChange(index, value)}
+                      disabled={!canEdit || !clientValidated || reservedProducts.length === 0}
+                    >
+                      <SelectTrigger
+                        className={`${
+                          errors[`numeroInterno${index}`] ? "border-destructive" : ""
+                        } ${numero.modelo ? "bg-green-50 border-green-200" : ""}`}
+                      >
+                        <SelectValue placeholder="Seleccionar número interno" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {/* Show current selection even if it's not in available */}
+                        {currentProduct && !availableProducts.some(p => p.numeroInterno === currentProduct.numeroInterno) && (
+                          <SelectItem key={currentProduct.numeroInterno} value={currentProduct.numeroInterno.toString()}>
+                            {currentProduct.numeroInterno} - {currentProduct.modelo}
+                          </SelectItem>
+                        )}
+                        {availableProducts.map((product) => (
+                          <SelectItem key={product.numeroInterno} value={product.numeroInterno.toString()}>
+                            {product.numeroInterno} - {product.modelo}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {errors[`numeroInterno${index}`] && (
+                      <p className="text-xs text-destructive">{errors[`numeroInterno${index}`]}</p>
+                    )}
+                    {numero.modelo && (
+                      <p className="text-xs text-green-600">✓ {numero.modelo}</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 

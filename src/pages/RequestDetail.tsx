@@ -650,20 +650,33 @@ export default function RequestDetail() { //NOSONAR
       if (newStatus === RequestStatus.APROBADA) {
         try {
           console.log('Sending approval email for request:', requestId);
-          const { error: emailError } = { error: undefined }
+          const emailResult = await exec('frwrd/send_approval_email', {
+            request_id: requestId
+          });
           
-          if (emailError) {
-            console.error('Error sending approval email:', emailError);
+          const emailData = emailResult.data?.[0];
+          
+          if (emailData?.error_msg) {
+            console.error('Error sending approval email:', emailData.error_msg);
             toast({
               title: "Email no enviado",
-              description: "La solicitud fue aprobada pero hubo un error al enviar el email de notificación",
+              description: "La solicitud fue aprobada pero hubo un error al enviar el email de notificación: " + emailData.error_msg,
               variant: "destructive"
             });
-          } else {
-            console.log('Approval email sent successfully');
+          } else if (emailData?.success) {
+            console.log('Approval email sent successfully:', emailData.message);
+            toast({
+              title: "Email enviado",
+              description: "Se ha enviado la notificación de aprobación por correo electrónico",
+            });
           }
         } catch (emailError) {
           console.error('Exception sending approval email:', emailError);
+          toast({
+            title: "Email no enviado",
+            description: "La solicitud fue aprobada pero hubo un error al enviar el email de notificación",
+            variant: "destructive"
+          });
         }
       }
     } catch (error) {
@@ -2133,58 +2146,56 @@ export default function RequestDetail() { //NOSONAR
               )}
 
               {/* Action Buttons */}
-              {canEdit && (
+              {canEdit && isEditing && (
                 <div className="pt-4 space-y-2">
-                  {isEditing ? (
-                    <div className="flex gap-2">
-                      <Button onClick={handleSave} disabled={isSaving} className="flex-1">
-                        <Save className="h-4 w-4 mr-2" />
-                        {isSaving ? "Guardando..." : "Guardar"}
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        onClick={() => setIsEditing(false)}
-                        disabled={isSaving}
-                      >
-                        Cancelar
-                      </Button>
-                    </div>
-                  ) : (
-                    <>
-                      {/* Send to Revision button for BORRADOR status */}
-                      {request.estado === RequestStatus.BORRADOR && (
-                        <Button 
-                          onClick={() => handleStatusChange(RequestStatus.EN_REVISION)}
-                          disabled={isSaving}
-                          className="w-full"
-                        >
-                          <Send className="h-4 w-4 mr-2" />
-                          {isSaving ? "Enviando..." : "Enviar a revisión"}
-                        </Button>
-                      )}
-                      
-                      {/* Approve/Reject buttons for EN_REVISION status (Admin only) */}
-                      {isAdmin && request.estado === RequestStatus.EN_REVISION && (
-                        <div className="flex flex-col gap-2">
-                          <Button 
-                            onClick={() => handleStatusChange(RequestStatus.APROBADA)}
-                            disabled={isSaving}
-                          >
-                            <Check className="h-4 w-4 mr-2" />
-                            Aprobar
-                          </Button>
-                          <Button 
-                            variant="destructive"
-                            onClick={() => handleStatusChange(RequestStatus.RECHAZADA)}
-                            disabled={isSaving}
-                          >
-                            <X className="h-4 w-4 mr-2" />
-                            Rechazar
-                          </Button>
-                        </div>
-                      )}
-                    </>
-                  )}
+                  <div className="flex gap-2">
+                    <Button onClick={handleSave} disabled={isSaving} className="flex-1">
+                      <Save className="h-4 w-4 mr-2" />
+                      {isSaving ? "Guardando..." : "Guardar"}
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      onClick={() => setIsEditing(false)}
+                      disabled={isSaving}
+                    >
+                      Cancelar
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {/* Send to Revision button for BORRADOR status - always visible */}
+              {request.estado === RequestStatus.BORRADOR && !isEditing && (
+                <div className="pt-4">
+                  <Button 
+                    onClick={() => handleStatusChange(RequestStatus.EN_REVISION)}
+                    disabled={isSaving}
+                    className="w-full"
+                  >
+                    <Send className="h-4 w-4 mr-2" />
+                    {isSaving ? "Enviando..." : "Enviar a revisión"}
+                  </Button>
+                </div>
+              )}
+              
+              {/* Approve/Reject buttons for EN_REVISION status (Admin only) */}
+              {isAdmin && request.estado === RequestStatus.EN_REVISION && (
+                <div className="pt-4 flex flex-col gap-2">
+                  <Button 
+                    onClick={() => handleStatusChange(RequestStatus.APROBADA)}
+                    disabled={isSaving}
+                  >
+                    <Check className="h-4 w-4 mr-2" />
+                    Aprobar
+                  </Button>
+                  <Button 
+                    variant="destructive"
+                    onClick={() => handleStatusChange(RequestStatus.RECHAZADA)}
+                    disabled={isSaving}
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    Rechazar
+                  </Button>
                 </div>
               )}
             </CardContent>

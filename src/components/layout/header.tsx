@@ -71,10 +71,6 @@ export function Header({ user, onLogout, currentViewRole, onViewRoleChange }: Re
                     </div>
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={onLogout}>
-                    <LogOut className="mr-2 h-4 w-4" />
-                    <span>Cerrar sesión</span>
-                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
           )}

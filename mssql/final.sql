@@ -736,38 +736,525 @@ BEGIN
 
 END
 
+GO
+
+-- =============================================================================
+-- PROCEDIMIENTO PARA ENVÍO DE CORREO DE SOLICITUD APROBADA
+-- =============================================================================
+
+IF OBJECT_ID('frwrd.send_approval_email', 'P') IS NOT NULL
+    DROP PROCEDURE frwrd.send_approval_email
+GO
+-- inicial
+CREATE PROCEDURE frwrd.send_approval_email
+    @request_id UNIQUEIDENTIFIER
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    DECLARE @error_msg NVARCHAR(MAX)
+    DECLARE @html_body NVARCHAR(MAX)
+    DECLARE @subject NVARCHAR(255)
+    DECLARE @recipients NVARCHAR(MAX)
+    DECLARE @cc_list NVARCHAR(MAX)
+    
+    -- Variables para datos de la solicitud
+    DECLARE @id UNIQUEIDENTIFIER
+    DECLARE @user_id VARCHAR(12)
+    DECLARE @cliente NVARCHAR(MAX)
+    DECLARE @rut NVARCHAR(50)
+    DECLARE @monto_negocio_usd DECIMAL(15,2)
+    DECLARE @unidades INT
+    DECLARE @numeros_internos NVARCHAR(MAX)
+    DECLARE @notas NVARCHAR(MAX)
+    DECLARE @banco NVARCHAR(255)
+    DECLARE @dias_forward INT
+    DECLARE @porcentaje_cobertura DECIMAL(5,2)
+    DECLARE @payments NVARCHAR(MAX)
+    DECLARE @estado NVARCHAR(50)
+    DECLARE @tc_referencial NUMERIC(18,6)
+    DECLARE @tc_cliente NUMERIC(18,6)
+    DECLARE @tc_spot NUMERIC(18,6)
+    DECLARE @puntos_forwards NUMERIC(18,6)
+    DECLARE @tc_all_in NUMERIC(18,6)
+    DECLARE @fecha_vencimiento DATETIMEOFFSET
+    DECLARE @valor_factura_usd_neto NUMERIC(18,6)
+    DECLARE @valor_factura_usd_total NUMERIC(18,6)
+    DECLARE @tc_factura NUMERIC(18,6)
+    DECLARE @total_factura_clp NUMERIC(18,6)
+    DECLARE @created_at DATETIMEOFFSET
+    
+    -- Variables para datos del usuario
+    DECLARE @vendedor_nombre NVARCHAR(100)
+    DECLARE @vendedor_email NVARCHAR(50)
+    
+    -- Variables para número de solicitud
+    DECLARE @request_number NVARCHAR(20)
+    DECLARE @request_index INT
+    
+    -- Variables para HTML de pagos
+    DECLARE @payments_html NVARCHAR(MAX) = ''
+    DECLARE @coverage_html NVARCHAR(MAX) = ''
+    DECLARE @billing_html NVARCHAR(MAX) = ''
+    DECLARE @numeros_internos_formatted NVARCHAR(MAX) = ''
+    
+    -- Variables para cálculos de facturación
+    DECLARE @valor_factura_total_calc NUMERIC(18,6)
+    DECLARE @valor_factura_neto_calc NUMERIC(18,6)
+    DECLARE @total_factura_clp_calc NUMERIC(18,6)
+    
+    BEGIN TRY
+        -- Obtener datos de la solicitud
+        SELECT 
+            @id = id,
+            @user_id = user_id,
+            @cliente = cliente,
+            @rut = rut,
+            @monto_negocio_usd = monto_negocio_usd,
+            @unidades = unidades,
+            @numeros_internos = numeros_internos,
+            @notas = notas,
+            @banco = banco,
+            @dias_forward = dias_forward,
+            @porcentaje_cobertura = porcentaje_cobertura,
+            @payments = payments,
+            @estado = estado,
+            @tc_referencial = tc_referencial,
+            @tc_cliente = tc_cliente,
+            @tc_spot = tc_spot,
+            @puntos_forwards = puntos_forwards,
+            @tc_all_in = tc_all_in,
+            @fecha_vencimiento = fecha_vencimiento,
+            @valor_factura_usd_neto = valor_factura_usd_neto,
+            @valor_factura_usd_total = valor_factura_usd_total,
+            @tc_factura = tc_factura,
+            @total_factura_clp = total_factura_clp,
+            @created_at = created_at
+        FROM frwrd.currency_requests
+        WHERE id = @request_id
+        
+        IF @id IS NULL
+        BEGIN
+            RAISERROR('Solicitud no encontrada', 16, 1)
+            RETURN
+        END
+        
+        -- Obtener datos del vendedor
+        SELECT 
+            @vendedor_nombre = LTRIM(RTRIM(ISNULL(Nombres_usuario, ''))) + ' ' + LTRIM(RTRIM(ISNULL(Apellidos_usuario, ''))),
+            @vendedor_email = Email
+        FROM Usuarios
+        WHERE Id_usuario = @user_id
+        
+        IF @vendedor_email IS NULL
+            SET @vendedor_email = 'noreply@epysa.cl'
+        
+        -- Calcular número de solicitud basado en orden de creación
+        SELECT @request_index = COUNT(*)
+        FROM frwrd.currency_requests
+        WHERE created_at <= @created_at
+        
+        SET @request_number = '#' + RIGHT('0000' + CAST(@request_index AS VARCHAR), 4)
+        
+        -- Generar HTML de pagos desde JSON
+        -- JSON structure: [{"tipo": "PIE", "montoClp": 12345.67, "fechaVencimiento": "2024-12-31", "observaciones": "..."}]
+        ;WITH PaymentsCTE AS (
+            SELECT 
+                ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) as idx,
+                JSON_VALUE(value, '$.tipo') as payment_type,
+                JSON_VALUE(value, '$.montoClp') as monto_clp,
+                JSON_VALUE(value, '$.fechaVencimiento') as fecha_vencimiento,
+                JSON_VALUE(value, '$.observaciones') as observaciones
+            FROM OPENJSON(@payments)
+        )
+        SELECT @payments_html = @payments_html + 
+            '<tr>' +
+            '<td>' + CAST(idx AS VARCHAR) + '</td>' +
+            '<td>' + 
+                CASE payment_type
+                    WHEN 'PIE' THEN 'Pie'
+                    WHEN 'CONTRA_ENTREGA' THEN 'Contra Entrega'
+                    WHEN 'FINANCIAMIENTO' THEN 'Financiamiento'
+                    WHEN 'CREDITO_EPYSA' THEN N'Crédito Epysa'
+                    WHEN 'BEP' THEN 'BEP'
+                    WHEN 'CHATARRIZACION' THEN N'Chatarrización'
+                    ELSE ISNULL(payment_type, 'N/A')
+                END +
+            '</td>' +
+            '<td>$' + ISNULL(FORMAT(CAST(monto_clp AS DECIMAL(15,2)), 'N2', 'es-CL'), 'N/A') + '</td>' +
+            '<td>' + ISNULL(FORMAT(CAST(fecha_vencimiento AS DATE), 'dd-MM-yyyy'), 'N/A') + '</td>' +
+            '<td>' + ISNULL(observaciones, '-') + '</td>' +
+            '</tr>'
+        FROM PaymentsCTE
+        
+        IF @payments_html = '' OR @payments_html IS NULL
+            SET @payments_html = '<tr><td colspan="5">Sin medios de pago registrados</td></tr>'
+        
+        -- Generar string formateado de números internos desde JSON
+        -- JSON structure: [{"numeroInterno": 12345, "modelo": "Bus Model"}]
+        ;WITH NumerosInternosCTE AS (
+            SELECT 
+                JSON_VALUE(value, '$.numeroInterno') as numero_interno,
+                JSON_VALUE(value, '$.modelo') as modelo
+            FROM OPENJSON(@numeros_internos)
+            WHERE JSON_VALUE(value, '$.numeroInterno') IS NOT NULL 
+              AND CAST(JSON_VALUE(value, '$.numeroInterno') AS INT) > 0
+        )
+        SELECT @numeros_internos_formatted = 
+            STUFF((
+                SELECT ', ' + numero_interno + 
+                    CASE WHEN modelo IS NOT NULL AND modelo != '' 
+                         THEN ' (' + modelo + ')' 
+                         ELSE '' 
+                    END
+                FROM NumerosInternosCTE
+                FOR XML PATH(''), TYPE
+            ).value('.', 'NVARCHAR(MAX)'), 1, 2, '')
+        
+        IF @numeros_internos_formatted = '' OR @numeros_internos_formatted IS NULL
+            SET @numeros_internos_formatted = '-'
+        
+        -- Generar HTML de cobertura si está aprobada
+        IF @estado = 'APROBADA'
+        BEGIN
+            SET @coverage_html = '
+            <div class="pdf-section">
+              <div class="pdf-section-title">Parámetros de Cobertura</div>
+              <div class="pdf-grid">
+                <div class="pdf-field">
+                  <div class="pdf-field-label">Banco</div>
+                  <div class="pdf-field-value">' + ISNULL(@banco, 'N/A') + '</div>
+                </div>
+                <div class="pdf-field">
+                  <div class="pdf-field-label">Días Forward</div>
+                  <div class="pdf-field-value">' + ISNULL(CAST(@dias_forward AS VARCHAR), 'N/A') + '</div>
+                </div>
+                <div class="pdf-field">
+                  <div class="pdf-field-label">Fecha Vencimiento</div>
+                  <div class="pdf-field-value">' + ISNULL(FORMAT(CAST(@fecha_vencimiento AS DATE), 'dd-MM-yyyy'), 'N/A') + '</div>
+                </div>
+                <div class="pdf-field">
+                  <div class="pdf-field-label">% Cobertura</div>
+                  <div class="pdf-field-value">' + ISNULL(FORMAT(@porcentaje_cobertura, 'N2') + '%', 'N/A') + '</div>
+                </div>
+                <div class="pdf-field">
+                  <div class="pdf-field-label">TC Cliente</div>
+                  <div class="pdf-field-value">$' + ISNULL(FORMAT(@tc_cliente, 'N4'), 'N/A') + '</div>
+                </div>
+                <div class="pdf-field">
+                  <div class="pdf-field-label">TC Spot</div>
+                  <div class="pdf-field-value">$' + ISNULL(FORMAT(@tc_spot, 'N4'), 'N/A') + '</div>
+                </div>
+                <div class="pdf-field">
+                  <div class="pdf-field-label">Puntos Forward</div>
+                  <div class="pdf-field-value">$' + ISNULL(FORMAT(@puntos_forwards, 'N4'), 'N/A') + '</div>
+                </div>
+                <div class="pdf-field">
+                  <div class="pdf-field-label">TC All-in</div>
+                  <div class="pdf-field-value">$' + ISNULL(FORMAT(@tc_all_in, 'N4'), 'N/A') + '</div>
+                </div>
+              </div>
+            </div>'
+            
+            -- Calcular y generar HTML de facturación si está aprobada
+            IF @tc_all_in > 0 AND @tc_cliente > 0 AND @unidades > 0
+            BEGIN
+                SET @valor_factura_total_calc = (@monto_negocio_usd * @tc_cliente) / (@tc_all_in * @unidades)
+                SET @valor_factura_neto_calc = @valor_factura_total_calc / 1.19
+                SET @total_factura_clp_calc = @valor_factura_total_calc * @tc_all_in
+                
+                SET @billing_html = '
+                <div class="pdf-section full-width">
+                  <div class="pdf-section-title">Facturación</div>
+                  <div class="pdf-grid" style="grid-template-columns: repeat(4, 1fr);">
+                    <div class="pdf-field">
+                      <div class="pdf-field-label">Valor Factura USD por Bus Neto</div>
+                      <div class="pdf-field-value">$' + FORMAT(@valor_factura_neto_calc, 'N2') + '</div>
+                    </div>
+                    <div class="pdf-field">
+                      <div class="pdf-field-label">Valor Factura USD por Bus Total</div>
+                      <div class="pdf-field-value">$' + FORMAT(@valor_factura_total_calc, 'N2') + '</div>
+                    </div>
+                    <div class="pdf-field">
+                      <div class="pdf-field-label">TC Factura</div>
+                      <div class="pdf-field-value">' + FORMAT(@tc_all_in, 'N4') + '</div>
+                    </div>
+                    <div class="pdf-field">
+                      <div class="pdf-field-label">Total Factura CLP por Bus</div>
+                      <div class="pdf-field-value">$' + FORMAT(@total_factura_clp_calc, 'N0', 'es-CL') + '</div>
+                    </div>
+                  </div>
+                </div>'
+            END
+        END
+        
+        -- Construir asunto del correo
+        SET @subject = N'Solicitud de Cobertura Aprobada - ' + @cliente
+        
+        -- Construir lista de destinatarios
+        SET @recipients = @vendedor_email
+        
+        -- Lista CC (coordinadores y administradores)
+        SET @cc_list = 'marco.navarrete@epysa.cl;analia.sepulveda@epysa.cl;bryan.vickers@epysa.cl;juan.donoso@epysa.cl;juan.villanueva@epysa.cl;kaina.villacura@epysa.cl;gonzalo.calderon@epysa.cl;felipe.rodriguez@epysa.cl'
+        
+        -- Construir HTML del correo
+        SET @html_body = '
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Solicitud Aprobada ' + @request_number + '</title>
+    <style>
+      @page { margin: 1cm; size: A4 portrait; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, ''Segoe UI'', Roboto, sans-serif;
+        font-size: 14px;
+        line-height: 1.4;
+        color: #1a1a1a;
+        background: white;
+        padding: 20px;
+        max-width: 800px;
+        margin: 0 auto;
+      }
+      .pdf-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #b91c1c;
+        margin-bottom: 12px;
+      }
+      .pdf-logo { max-width: 120px; height: auto; }
+      .pdf-title-section { text-align: right; }
+      .pdf-title {
+        font-size: 24px;
+        font-weight: 700;
+        color: #b91c1c;
+        line-height: 1.2;
+      }
+      .pdf-subtitle {
+        font-size: 13px;
+        color: #6b7280;
+        margin-top: 3px;
+      }
+      .pdf-status-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        margin-top: 6px;
+      }
+      .pdf-status-aprobada { background: #dcfce7; color: #166534; }
+      .pdf-status-en-revision { background: #fef3c7; color: #92400e; }
+      .pdf-status-borrador { background: #f3f4f6; color: #374151; }
+      .pdf-status-rechazada { background: #fee2e2; color: #991b1b; }
+      .pdf-status-anulada { background: #f3f4f6; color: #6b7280; }
+      
+      .two-column-layout {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .full-width { grid-column: 1 / -1; }
+      
+      .pdf-section {
+        margin-bottom: 10px;
+        page-break-inside: avoid;
+      }
+      .pdf-section-title {
+        font-size: 16px;
+        font-weight: 700;
+        color: #b91c1c;
+        margin-bottom: 8px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid #e5e7eb;
+      }
+      .pdf-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 10px;
+      }
+      .pdf-field {
+        padding: 10px;
+        background: #f9fafb;
+        border-radius: 4px;
+        border: 1px solid #e5e7eb;
+      }
+      .pdf-field-label {
+        font-size: 10px;
+        color: #6b7280;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        margin-bottom: 4px;
+      }
+      .pdf-field-value {
+        font-size: 14px;
+        font-weight: 700;
+        color: #1a1a1a;
+      }
+      
+      .pdf-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+        font-size: 13px;
+      }
+      .pdf-table th {
+        background: #b91c1c;
+        color: white;
+        padding: 8px 10px;
+        text-align: left;
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .pdf-table td {
+        padding: 8px 10px;
+        border-bottom: 1px solid #e5e7eb;
+        font-size: 12px;
+      }
+      .pdf-table tbody tr:nth-child(even) {
+        background: #f9fafb;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pdf-header">
+      <img src="https://hblbwermqzsbibanrjpy.supabase.co/storage/v1/object/public/assets/epysa-logo.jpg" alt="Epysa Logo" class="pdf-logo" />
+      <div class="pdf-title-section">
+        <div class="pdf-title">Solicitud de Cobertura</div>
+        <div class="pdf-subtitle">Folio: ' + @request_number + '</div>
+        <div class="pdf-subtitle">Fecha: ' + FORMAT(@created_at, 'dd-MM-yyyy') + '</div>
+        <span class="pdf-status-badge pdf-status-' + LOWER(@estado) + '">' + @estado + '</span>
+      </div>
+    </div>
+
+    <div class="two-column-layout">
+      <div class="pdf-section">
+        <div class="pdf-section-title">Información del Cliente</div>
+        <div class="pdf-grid">
+          <div class="pdf-field">
+            <div class="pdf-field-label">Cliente</div>
+            <div class="pdf-field-value">' + ISNULL(@cliente, 'N/A') + '</div>
+          </div>
+          <div class="pdf-field">
+            <div class="pdf-field-label">RUT</div>
+            <div class="pdf-field-value">' + ISNULL(@rut, 'N/A') + '</div>
+          </div>
+          <div class="pdf-field">
+            <div class="pdf-field-label">Monto Negocio (USD)</div>
+            <div class="pdf-field-value">$' + FORMAT(@monto_negocio_usd, 'N2', 'es-CL') + '</div>
+          </div>
+          <div class="pdf-field">
+            <div class="pdf-field-label">Unidades</div>
+            <div class="pdf-field-value">' + CAST(@unidades AS VARCHAR) + '</div>
+          </div>
+          <div class="pdf-field">
+            <div class="pdf-field-label">Vendedor</div>
+            <div class="pdf-field-value">' + ISNULL(@vendedor_nombre, @vendedor_email) + '</div>
+          </div>
+        </div>
+      </div>
+
+      ' + @coverage_html + '
+    </div>
+
+    <div class="pdf-section full-width">
+      <div class="pdf-section-title">Medios de Pago</div>
+      <table class="pdf-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Tipo</th>
+            <th>Monto CLP</th>
+            <th>Fecha Vencimiento</th>
+            <th>Observaciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          ' + @payments_html + '
+        </tbody>
+      </table>
+      
+      <!-- Internal Numbers -->
+      <div style="margin-top: 8px;">
+        <div class="pdf-field">
+          <div class="pdf-field-label">Números Internos</div>
+          <div class="pdf-field-value">' + @numeros_internos_formatted + '</div>
+        </div>
+      </div>
+    </div>
+
+    ' + @billing_html + '
+  </body>
+</html>'
+        
+        -- Enviar correo usando Database Mail
+        EXEC msdb.dbo.sp_send_dbmail
+            @recipients = @recipients,
+            @copy_recipients = @cc_list,
+            @subject = @subject,
+            @body = @html_body,
+            @body_format = 'HTML'
+        
+        -- Retornar éxito
+        SELECT 
+            error_msg = NULL,
+            success = 1,
+            message = 'Correo enviado correctamente a ' + @recipients
+            
+    END TRY
+    BEGIN CATCH
+        SELECT @error_msg = ERROR_MESSAGE()
+        SELECT 
+            error_msg = @error_msg,
+            success = 0,
+            message = 'Error al enviar correo: ' + @error_msg
+    END CATCH
+END
 
 
 
-EXEC ECP_ListaVendedores_Consola
-
-Entidad_comercial	Nombre	Tipo
 
 
+GO
 
-SELECT * FROM frwrd.currency_requests
+EXEC frwrd.send_approval_email 
+    @request_id = '48ff88fe-5771-4a36-9e2c-fa42449e5f76'  -- Reemplazar con un ID de solicitud válido para prueba
 
-ALTER TABLE frwrd.currency_requests
-ADD request_number INT NOT NULL IDENTITY(1,1);
-
-
-SELECT TOP 10 * FROM Usuarios WHERE S_H IS NOT NULL OR S_M IS NOT NULL
-
-SELECT TOP 10 * FROM Entidades_comerciales e
-
-EXEC CLI_ListaClientes
-
-
-EXEC PRI_Lista_productos_individuales
+GO
+-- inicial
+ALTER PROCEDURE frwrd.lista_reservados
+    @cliente NVARCHAR(100)
+AS
+BEGIN
+    SET NOCOUNT ON; 
 
 
-SELECT * FROM Productos_individuales
+    SELECT 
+        modelo = Productos.Nombre,
+        numeroInterno = Productos_individuales.Numero_interno_epysa
+    FROM Productos_individuales 
+    INNER JOIN Productos 
+        ON Productos_individuales.Producto = Productos.Producto
+    WHERE Cliente_Reserva = @cliente
+    AND Productos_individuales.Estado NOT IN ( 'F', 'V' )
+    ORDER BY Productos_individuales.Numero_interno_epysa ASC;
+
+END
 
 
-SELECT 
-    p.Nombre
-FROM 
-    Productos_individuales
-INNER JOIN 
-    Productos p 
-        ON Productos_individuales.Producto = p.Producto
+    SELECT 
+        modelo = Productos.Nombre,
+        numeroInterno = Productos_individuales.Numero_interno_epysa,
+        Cliente_Reserva
+    FROM Productos_individuales 
+    INNER JOIN Productos 
+        ON Productos_individuales.Producto = Productos.Producto
+    WHERE Cliente_Reserva IS NOT NULL
+    AND Productos_individuales.Estado NOT IN ( 'F', 'V' )
+    ORDER BY Productos_individuales.Cliente_Reserva ASC;
