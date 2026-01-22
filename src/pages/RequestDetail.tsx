@@ -61,6 +61,8 @@ export default function RequestDetail() { //NOSONAR
   const [tcAllIn, setTcAllIn] = useState("");
   const [numeroSie, setNumeroSie] = useState("");
   const [numerosInternos, setNumerosInternos] = useState<NumeroInterno[]>([]);
+  const [reservedProducts, setReservedProducts] = useState<Array<{ numeroInterno: number; modelo: string }>>([]);
+  const [isLoadingReserved, setIsLoadingReserved] = useState(false);
 
   // Bank comparison states
   const [selectedBank1, setSelectedBank1] = useState("SCOTIABANK");
@@ -242,6 +244,56 @@ export default function RequestDetail() { //NOSONAR
       });
     }
   }, [editUnidades, isEditingRequestData]);
+
+  // Fetch reserved products when editing starts
+  useEffect(() => {
+    const fetchReservedProducts = async () => {
+      if (isEditingRequestData && request?.rut) {
+        setIsLoadingReserved(true);
+        try {
+          const cleanRut = request.rut.replace(/[.-]/g, '');
+          const reservedResult = await exec('frwrd/lista_reservados', { cliente: cleanRut });
+          if (reservedResult.data && reservedResult.data.length > 0) {
+            setReservedProducts(reservedResult.data.map((p: { numeroInterno: number; modelo: string }) => ({
+              numeroInterno: p.numeroInterno,
+              modelo: p.modelo || ''
+            })));
+          } else {
+            setReservedProducts([]);
+          }
+        } catch (err) {
+          console.error('Error fetching reserved products:', err);
+          setReservedProducts([]);
+        } finally {
+          setIsLoadingReserved(false);
+        }
+      }
+    };
+    fetchReservedProducts();
+  }, [isEditingRequestData, request?.rut]);
+
+  // Get available options for numeroInterno select (exclude already selected ones)
+  const getAvailableProducts = (currentIndex: number) => {
+    const selectedNumerosInternos = new Set(
+      numerosInternos
+        .filter((_, idx) => idx !== currentIndex)
+        .map(n => n.numeroInterno)
+        .filter(n => n > 0)
+    );
+    
+    return reservedProducts.filter(p => !selectedNumerosInternos.has(p.numeroInterno));
+  };
+
+  // Handle numeroInterno change from Select
+  const handleNumeroInternoChange = (index: number, value: string) => {
+    const numValue = Number.parseInt(value, 10) || 0;
+    const selectedProduct = reservedProducts.find(p => p.numeroInterno === numValue);
+    const modelo = selectedProduct?.modelo || '';
+    
+    const newNumbers = [...numerosInternos];
+    newNumbers[index] = { numeroInterno: numValue, modelo };
+    setNumerosInternos(newNumbers);
+  };
 
   useEffect(() => {
     const loadRequest = async () => {
@@ -1280,28 +1332,52 @@ export default function RequestDetail() { //NOSONAR
               {isEditingRequestData && (
                 <div className="space-y-4">
                   <Label className="text-base font-medium">Números internos</Label>
+                  {isLoadingReserved && (
+                    <p className="text-sm text-muted-foreground">Cargando productos reservados...</p>
+                  )}
+                  {!isLoadingReserved && reservedProducts.length === 0 && (
+                    <p className="text-sm text-amber-600">No hay productos reservados para este cliente</p>
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {numerosInternos.map((numero, index) => (
-                      <div key={index} className="space-y-2">
-                        <Label htmlFor={`numeroInterno${index}`}>
-                          Número interno {index + 1}
-                        </Label>
-                        <Input
-                          id={`numeroInterno${index}`}
-                          type="number"
-                          value={numero.numeroInterno || ''}
-                          onChange={(e) => {
-                            const newNumbers = [...numerosInternos];
-                            newNumbers[index] = { ...newNumbers[index], numeroInterno: Number.parseInt(e.target.value) || 0 };
-                            setNumerosInternos(newNumbers);
-                          }}
-                          placeholder={`Ingrese número interno ${index + 1}`}
-                        />
-                        {numero.modelo && (
-                          <p className="text-xs text-green-600">✓ {numero.modelo}</p>
-                        )}
-                      </div>
-                    ))}
+                    {numerosInternos.map((numero, index) => {
+                      const availableProducts = getAvailableProducts(index);
+                      const currentProduct = reservedProducts.find(p => p.numeroInterno === numero.numeroInterno);
+                      
+                      return (
+                        <div key={`interno-${numero.numeroInterno || index}`} className="space-y-2">
+                          <Label htmlFor={`numeroInterno${index}`}>
+                            Número interno {index + 1}
+                          </Label>
+                          <Select
+                            value={numero.numeroInterno > 0 ? numero.numeroInterno.toString() : ''}
+                            onValueChange={(value) => handleNumeroInternoChange(index, value)}
+                            disabled={reservedProducts.length === 0}
+                          >
+                            <SelectTrigger
+                              className={numero.modelo ? "bg-green-50 border-green-200" : ""}
+                            >
+                              <SelectValue placeholder="Seleccionar número interno" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {/* Show current selection even if it's not in available */}
+                              {currentProduct && !availableProducts.some(p => p.numeroInterno === currentProduct.numeroInterno) && (
+                                <SelectItem key={currentProduct.numeroInterno} value={currentProduct.numeroInterno.toString()}>
+                                  {currentProduct.numeroInterno} - {currentProduct.modelo}
+                                </SelectItem>
+                              )}
+                              {availableProducts.map((product) => (
+                                <SelectItem key={product.numeroInterno} value={product.numeroInterno.toString()}>
+                                  {product.numeroInterno} - {product.modelo}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {numero.modelo && (
+                            <p className="text-xs text-green-600">✓ {numero.modelo}</p>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
