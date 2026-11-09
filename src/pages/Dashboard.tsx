@@ -171,12 +171,10 @@ export default function Dashboard() {
           <CardHeader>
           <div className="flex flex-col md:flex-row md:items-center justify-between space-y-4 md:space-y-0">
             <CardTitle>Solicitudes de seguro de cambio</CardTitle>
-            {!isCoordinator && (
               <Button onClick={onNewRequest}>
                 <Plus className="h-4 w-4 mr-2" />
                 Nueva solicitud
               </Button>
-            )}
           </div>
           </CardHeader>
           <CardContent>
